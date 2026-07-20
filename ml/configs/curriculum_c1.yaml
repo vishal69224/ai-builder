@@ -1,0 +1,13 @@
+# Curriculum stage C1 — component generation
+stage: c1
+mode_token: "<|comp|>"
+max_seq_len: 512
+data_manifest: datasets/processed/ds_comp_v1/manifest.json
+epochs: 5
+batch_size: 16
+lr: 1.0e-4
+replay_prev_ratio: 0.0
+exit_criteria:
+  format_valid_pct: 90
+  jsx_parse_pct: 80
+checkpoint_dir: checkpoints/tinygpt-8m-c1

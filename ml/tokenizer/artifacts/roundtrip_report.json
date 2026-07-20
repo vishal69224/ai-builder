@@ -1,0 +1,123 @@
+{
+  "vocab_size": 2771,
+  "passed": true,
+  "failures": [],
+  "results": [
+    {
+      "check": "special_id:bos",
+      "ok": true,
+      "id": 0
+    },
+    {
+      "check": "special_id:eos",
+      "ok": true,
+      "id": 1
+    },
+    {
+      "check": "special_id:pad",
+      "ok": true,
+      "id": 2
+    },
+    {
+      "check": "special_id:user",
+      "ok": true,
+      "id": 3
+    },
+    {
+      "check": "special_id:assistant",
+      "ok": true,
+      "id": 4
+    },
+    {
+      "check": "special_id:file",
+      "ok": true,
+      "id": 5
+    },
+    {
+      "check": "special_id:path",
+      "ok": true,
+      "id": 6
+    },
+    {
+      "check": "special_id:content",
+      "ok": true,
+      "id": 7
+    },
+    {
+      "check": "special_id:comp",
+      "ok": true,
+      "id": 8
+    },
+    {
+      "check": "special_id:page",
+      "ok": true,
+      "id": 9
+    },
+    {
+      "check": "special_id:site",
+      "ok": true,
+      "id": 10
+    },
+    {
+      "check": "roundtrip_sample_0",
+      "ok": true,
+      "n_tokens": 30,
+      "preview": "export function Navbar() {\\n  return <header className=\"bg-white/10 backdrop-blur"
+    },
+    {
+      "check": "roundtrip_sample_1",
+      "ok": true,
+      "n_tokens": 15,
+      "preview": "import { Route, Routes } from 'react-router-dom'\\n"
+    },
+    {
+      "check": "roundtrip_sample_2",
+      "ok": true,
+      "n_tokens": 26,
+      "preview": "{\"name\":\"bean-house\",\"dependencies\":{\"react\":\"^19.0.0\"}}\\n"
+    },
+    {
+      "check": "roundtrip_sample_3",
+      "ok": true,
+      "n_tokens": 19,
+      "preview": "@import \"tailwindcss\";\\n:root { --brand: #0d9488; }\\n"
+    },
+    {
+      "check": "structured_contains:bos",
+      "ok": true
+    },
+    {
+      "check": "structured_contains:user",
+      "ok": true
+    },
+    {
+      "check": "structured_contains:assistant",
+      "ok": true
+    },
+    {
+      "check": "structured_contains:comp",
+      "ok": true
+    },
+    {
+      "check": "structured_contains:file",
+      "ok": true
+    },
+    {
+      "check": "structured_contains:path",
+      "ok": true
+    },
+    {
+      "check": "structured_contains:content",
+      "ok": true
+    },
+    {
+      "check": "structured_contains:eos",
+      "ok": true
+    },
+    {
+      "check": "compression_ratio",
+      "ok": true,
+      "chars_per_token": 3.37
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "bos": "<|bos|>",
+  "eos": "<|eos|>",
+  "pad": "<|pad|>",
+  "user": "<|user|>",
+  "assistant": "<|assistant|>",
+  "file": "<|file|>",
+  "path": "<|path|>",
+  "content": "<|content|>",
+  "comp": "<|comp|>",
+  "page": "<|page|>",
+  "site": "<|site|>"
+}

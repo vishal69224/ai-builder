@@ -1,0 +1,18 @@
+# Curriculum stage C3 — full website
+stage: c3
+mode_token: "<|site|>"
+max_seq_len: 2048
+data_manifest: datasets/processed/ds_site_v1/manifest.json
+replay_manifests:
+  - datasets/processed/ds_comp_v1/manifest.json
+  - datasets/processed/ds_page_v1/manifest.json
+replay_prev_ratio: 0.4
+epochs: 4
+batch_size: 4
+lr: 5.0e-5
+exit_criteria:
+  format_valid_pct: 80
+  jsx_parse_pct: 50
+  structure_ok_pct: 40
+  build_pass_pct: 20
+checkpoint_dir: checkpoints/tinygpt-8m-c3

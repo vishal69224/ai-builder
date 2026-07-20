@@ -1,0 +1,23 @@
+# TinyGPT-8M — locked hyperparameters (reference; used in Phase 4+)
+model:
+  name: tinygpt-8m
+  d_model: 384
+  n_layers: 6
+  n_heads: 6
+  ffn_dim: 1536
+  vocab_size: 2771  # actual trained size; retrain toward 16384 in Phase 3 with larger data
+  # Always load vocab_size from ml/tokenizer/artifacts/tokenizer_meta.json at runtime
+  vocab_size_target: 16384
+  vocab_size_note: "ByteLevel BPE vocab grows with unique merges; Phase 2 corpus → ~2.7k; Phase 3 will retrain"
+device:
+  prefer: mps  # Apple M1
+  fallback: cpu
+  dtype: float32
+
+train:
+  optimizer: adamw
+  lr_pretrain: 3.0e-4
+  lr_sft: 1.0e-4
+  weight_decay: 0.1
+  grad_clip: 1.0
+  warmup_steps: 500

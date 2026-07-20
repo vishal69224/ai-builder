@@ -1,0 +1,13 @@
+batch_size: 4
+checkpoint_dir: checkpoints/tinygpt-8m-c1
+data_manifest: datasets/processed/ds_comp_v1/manifest.json
+epochs: 1
+exit_criteria:
+  format_valid_pct: 90
+  jsx_parse_pct: 80
+lr: 0.0001
+max_seq_len: 512
+max_steps: 60
+mode_token: <|comp|>
+replay_prev_ratio: 0.0
+stage: c1

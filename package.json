@@ -1,0 +1,11 @@
+{
+  "name": "ai-website-builder",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix apps/web",
+    "dev:web": "npm run dev --prefix apps/web",
+    "build": "npm run build --prefix apps/web",
+    "dev:api": "cd apps/api && .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "train:ai": "cd apps/api && .venv/bin/python -c \"import sys; sys.path.insert(0,'.'); from scripts.train_local_ai import main; main()\""
+  }
+}

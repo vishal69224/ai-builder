@@ -1,0 +1,15 @@
+# Curriculum stage C2 — page generation
+stage: c2
+mode_token: "<|page|>"
+max_seq_len: 1024
+data_manifest: datasets/processed/ds_page_v1/manifest.json
+replay_manifests:
+  - datasets/processed/ds_comp_v1/manifest.json
+replay_prev_ratio: 0.3
+epochs: 4
+batch_size: 8
+lr: 8.0e-5
+exit_criteria:
+  format_valid_pct: 85
+  jsx_parse_pct: 70
+checkpoint_dir: checkpoints/tinygpt-8m-c2
