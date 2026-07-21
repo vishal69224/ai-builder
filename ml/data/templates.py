@@ -29,6 +29,8 @@ SITE_TYPES = [
 ]
 
 
+# here is comment 
+
 def stable_id(prefix: str, *parts: Any) -> str:
     h = hashlib.sha1("|".join(map(str, parts)).encode()).hexdigest()[:10]
     return f"{prefix}_{h}"
