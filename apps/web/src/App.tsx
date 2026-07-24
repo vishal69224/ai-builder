@@ -9,6 +9,7 @@ import { NewProjectPage } from './pages/NewProjectPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { StudioHomePage } from './pages/StudioHomePage'
 import { WorkspacePage } from './pages/WorkspacePage'
 import { ThemeProvider } from './theme/ThemeContext'
 
@@ -18,11 +19,12 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter>
           <Routes>
+            <Route path="/" element={<StudioHomePage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route element={<ProtectedRoute />}>
               <Route element={<DashboardLayout />}>
-                <Route path="/" element={<ProjectsPage />} />
+                <Route path="/projects" element={<ProjectsPage />} />
                 <Route path="/projects/new" element={<NewProjectPage />} />
                 <Route path="/history" element={<HistoryPage />} />
                 <Route path="/settings" element={<SettingsPage />} />

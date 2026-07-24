@@ -64,8 +64,8 @@ CURATED_TYPES: list[WebsiteType] = [
     _type("bakery", "Bakery", "food_beverage", ("bakery", "pastry", "bread", "croissant"), _RESTAURANT_PAGES, _SHOP_COMPONENTS, ("warm", "cream", "artisan"), _ANIM_SOFT),
     _type("restaurant", "Restaurant", "food_beverage", ("restaurant", "dining", "bistro", "eatery"), _RESTAURANT_PAGES, _SHOP_COMPONENTS + ("ReservationForm",), ("elegant", "charcoal", "refined")),
     _type("bar_lounge", "Bar & Lounge", "food_beverage", ("bar", "lounge", "cocktail", "nightlife"), ("Home", "Menu", "Events", "Reservations", "Contact"), _SHOP_COMPONENTS, ("dark", "gold", "nightlife"), _ANIM_BOLD),
-    _type("saas_startup", "SaaS Startup", "software", ("saas", "startup", "software platform", "b2b"), _SAAS_PAGES, _SAAS_COMPONENTS, ("clean", "indigo", "product-led")),
-    _type("ai_product", "AI Product", "software", ("ai product", "machine learning", "llm", "chatgpt"), _SAAS_PAGES, _SAAS_COMPONENTS + ("DemoWidget",), ("futuristic", "violet", "innovative"), _ANIM_BOLD),
+    _type("saas_startup", "SaaS Startup", "software", ("saas", "startup", "software platform", "b2b", "video generator", "ai video", "text to video", "generator website", "ai tool", "ai app", "software tool", "web app product"), _SAAS_PAGES, _SAAS_COMPONENTS, ("clean", "indigo", "product-led")),
+    _type("ai_product", "AI Product", "software", ("ai product", "machine learning", "llm", "chatgpt", "generative ai", "ai generator", "video ai", "image generator", "ai platform"), _SAAS_PAGES, _SAAS_COMPONENTS + ("DemoWidget",), ("futuristic", "violet", "innovative"), _ANIM_BOLD),
     _type("fintech", "Fintech", "finance", ("fintech", "banking app", "payments", "wallet"), _SAAS_PAGES, _SAAS_COMPONENTS + ("SecurityBadges",), ("trust", "navy", "secure")),
     _type("crypto_exchange", "Crypto Exchange", "finance", ("crypto", "bitcoin", "exchange", "web3", "nft"), ("Home", "Markets", "Trade", "Learn", "Security"), _SAAS_COMPONENTS, ("dark", "neon", "tech"), _ANIM_BOLD),
     _type(
@@ -247,7 +247,7 @@ _VERTICALS: dict[str, tuple[tuple[str, tuple[str, ...]], ...]] = {
         ("catering", ("catering",)),
     ),
     "retail": (
-        ("bookstore", ("bookstore", "book shop")),
+        ("bookstore", ("bookstore", "book store", "bookshop", "book shop", "online bookstore", "buy books", "read books")),
         ("florist", ("florist", "flower shop")),
         ("jewelry", ("jewelry", "jeweller")),
         ("furniture", ("furniture store", "home furnishings")),

@@ -41,7 +41,7 @@ class RouterGenerator:
                     "export default function App() {\n"
                     "  useTheme()\n"
                     "  return (\n"
-                    "    <div className=\"flex min-h-screen flex-col\">\n"
+                    "    <div className=\"flex min-h-screen flex-col overflow-x-hidden\">\n"
                     "      <Navbar />\n"
                     "      <main className=\"flex-1\">\n"
                     "        <Routes>\n"

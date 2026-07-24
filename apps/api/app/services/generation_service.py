@@ -23,8 +23,8 @@ class GenerationService:
             user_id=user.id,
             prompt=prompt.strip(),
             status=GenerationStatus.queued,
-            provider="mock" if self.settings.ai_mock or not self.settings.ai_api_key else "openai_compatible",
-            model=self.settings.ai_model,
+            provider="orchestrator",
+            model="local-website-ai-v1",
         )
         self.db.add(run)
         self.db.flush()

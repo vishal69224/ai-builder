@@ -1,15 +1,17 @@
-# Curriculum stage C3 — full website
+# Curriculum stage C3 — full website (practical M1 settings)
+# Full 2048-seq / 4-epoch run: see curriculum_c3_full.yaml
 stage: c3
 mode_token: "<|site|>"
-max_seq_len: 2048
+max_seq_len: 1024
 data_manifest: datasets/processed/ds_site_v1/manifest.json
 replay_manifests:
   - datasets/processed/ds_comp_v1/manifest.json
   - datasets/processed/ds_page_v1/manifest.json
-replay_prev_ratio: 0.4
-epochs: 4
-batch_size: 4
+replay_prev_ratio: 0.3
+epochs: 2
+batch_size: 2
 lr: 5.0e-5
+max_steps: 180
 exit_criteria:
   format_valid_pct: 80
   jsx_parse_pct: 50

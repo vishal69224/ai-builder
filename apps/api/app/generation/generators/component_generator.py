@@ -1,42 +1,240 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
-from app.generation.pipeline import GeneratedFile, ProjectPlan, StructuredRequirements
+from app.core.config import get_settings
+from app.generation.pipeline import GeneratedFile, ProjectPlan, StructuredRequirements, WebsitePlan
+
+
+_IMPORT_RE = re.compile(
+    r"""from\s+['"](\.\.?/[^'"]+)['"]""",
+)
+
+
+def _overlay_imports_resolve(files: list[GeneratedFile]) -> bool:
+    """Reject hybrid overlays that import components not present in the project."""
+    paths = {f.path for f in files}
+    # Also index without extension variants
+    stems = set(paths)
+    for p in list(paths):
+        if p.endswith((".tsx", ".ts", ".jsx", ".js")):
+            stems.add(p.rsplit(".", 1)[0])
+
+    for f in files:
+        if not f.path.endswith((".tsx", ".ts", ".jsx", ".js")):
+            continue
+        parent = "/".join(f.path.split("/")[:-1])
+        for rel in _IMPORT_RE.findall(f.content or ""):
+            # Resolve relative import against file dir
+            parts = (parent + "/" + rel).split("/")
+            stack: list[str] = []
+            for part in parts:
+                if part in ("", "."):
+                    continue
+                if part == "..":
+                    if stack:
+                        stack.pop()
+                    continue
+                stack.append(part)
+            resolved = "/".join(stack)
+            candidates = (
+                resolved,
+                resolved + ".tsx",
+                resolved + ".ts",
+                resolved + ".jsx",
+                resolved + ".js",
+                resolved + "/index.tsx",
+                resolved + "/index.ts",
+            )
+            if not any(c in stems or c in paths for c in candidates):
+                return False
+    return True
 
 
 class ComponentGenerator:
-    """Generate real React + Tailwind sites — style picked from prompt intent."""
+    """Generate real React + Tailwind sites — style picked from prompt intent.
 
-    def generate(self, requirements: StructuredRequirements, plan: ProjectPlan) -> list[GeneratedFile]:
+    When a WebsitePlan niche is provided and v2 validator/pipeline is enabled,
+    niche dispatch wins over the legacy footwear-first keyword gates.
+
+    Optional TinyGPT hybrid: if the local model returns quality-gated files,
+    they overlay the rule-engine output (never replace the whole site on failure).
+    """
+
+    def generate(
+        self,
+        requirements: StructuredRequirements,
+        plan: ProjectPlan,
+        *,
+        website_plan: WebsitePlan | dict[str, Any] | None = None,
+    ) -> list[GeneratedFile]:
+        settings = get_settings()
+        niche = None
+        if website_plan is not None:
+            niche = website_plan.niche if isinstance(website_plan, WebsitePlan) else website_plan.get("niche")
+
+        use_niche = bool(niche) and (
+            settings.gen_v2_validator
+            or settings.generation_pipeline == "v2"
+            or settings.gen_v2_components
+        )
+        specialty = {
+            "clothing",
+            "footwear",
+            "electronics",
+            "blog",
+            "portfolio",
+            "saas",
+            "bookstore",
+        }
+        if use_niche:
+            routed = self._generate_by_niche(str(niche), requirements, plan)
+            if routed is not None:
+                # Specialty generators ship complete, buildable sites.
+                # TinyGPT must not overwrite their pages (breaks vite imports).
+                if str(niche) in specialty:
+                    return routed
+                return self._maybe_hybrid_overlay(requirements, routed)
+            return self._maybe_hybrid_overlay(requirements, self._generate_legacy(requirements, plan))
+
+        return self._maybe_hybrid_overlay(requirements, self._generate_legacy(requirements, plan))
+
+    def _maybe_hybrid_overlay(
+        self, requirements: StructuredRequirements, base: list[GeneratedFile]
+    ) -> list[GeneratedFile]:
+        settings = get_settings()
+        if not settings.tinygpt_hybrid:
+            return base
+        try:
+            from app.generation.ai.tinygpt_client import (
+                files_pass_quality_gate,
+                generate_files,
+                health,
+            )
+
+            if health(base_url=settings.tinygpt_base_url, timeout=1.0) is None:
+                return base
+            prompt = requirements.analysis.raw_prompt or ""
+            ai_files = generate_files(
+                prompt,
+                mode="site",
+                base_url=settings.tinygpt_base_url,
+                max_new_tokens=768,
+                timeout=float(settings.tinygpt_timeout_seconds),
+            )
+            if not ai_files or not files_pass_quality_gate(ai_files, mode="site"):
+                # Try page-level enrich for a couple of key shells
+                page_files = generate_files(
+                    prompt,
+                    mode="page",
+                    base_url=settings.tinygpt_base_url,
+                    max_new_tokens=512,
+                    timeout=min(30.0, float(settings.tinygpt_timeout_seconds)),
+                )
+                if page_files and files_pass_quality_gate(page_files, mode="page"):
+                    ai_files = page_files
+                else:
+                    return base
+
+            by_path = {f.path: f for f in base}
+            protected = {
+                "package.json",
+                "tsconfig.json",
+                "vite.config.ts",
+                "index.html",
+                "src/main.tsx",
+                "src/App.tsx",
+            }
+            for item in ai_files:
+                path = item["path"]
+                # Never let TinyGPT wipe package/tsconfig with garbage
+                if path in protected and len(item["content"]) < 40:
+                    continue
+                # Never replace the shell/router entrypoints with partial AI junk
+                if path in protected:
+                    continue
+                by_path[path] = GeneratedFile(path=path, content=item["content"])
+
+            merged = list(by_path.values())
+            if not _overlay_imports_resolve(merged):
+                return base
+            return merged
+        except Exception:
+            return base
+
+    def _generate_by_niche(
+        self, niche: str, requirements: StructuredRequirements, plan: ProjectPlan
+    ) -> list[GeneratedFile] | None:
+        if niche == "footwear":
+            from app.generation.generators.footwear import generate_shoe_store
+
+            return generate_shoe_store(requirements, plan)
+        if niche == "clothing":
+            from app.generation.generators.luxury_fashion import generate_luxury_fashion
+
+            return generate_luxury_fashion(requirements, plan)
+        if niche == "electronics":
+            from app.generation.generators.electronics import generate_electronics_store
+
+            return generate_electronics_store(requirements, plan)
+        if niche == "blog":
+            from app.generation.generators.blog import generate_seo_blog
+
+            return generate_seo_blog(requirements, plan)
+        if niche == "portfolio":
+            from app.generation.generators.dev_portfolio import generate_dev_portfolio
+
+            return generate_dev_portfolio(requirements, plan)
+        if niche == "saas":
+            from app.generation.generators.saas_product import generate_saas_product
+
+            return generate_saas_product(requirements, plan)
+        if niche == "bookstore":
+            from app.generation.generators.bookstore import generate_bookstore
+
+            return generate_bookstore(requirements, plan)
+        # Other niches fall through to legacy keyword path / generic
+        return None
+
+    def _generate_legacy(self, requirements: StructuredRequirements, plan: ProjectPlan) -> list[GeneratedFile]:
         analysis = requirements.analysis
         type_id = (analysis.website_type_id or "").lower()
         prompt = analysis.raw_prompt.lower()
 
+        from app.generation.understanding.intent_guards import (
+            explicitly_forbids_footwear,
+            has_strong_clothing_intent,
+            positive_footwear_intent,
+        )
+
         def has_word(*words: str) -> bool:
             return any(re.search(rf"\b{re.escape(w)}\b", prompt) for w in words)
 
-        is_footwear = (
+        # Never treat "Do NOT use sneakers" as a shoe-store request
+        is_footwear = positive_footwear_intent(analysis.raw_prompt) and (
             any(k in type_id for k in ("shoe", "sneaker", "footwear"))
-            or has_word(
-                "shoe",
-                "shoes",
-                "sneaker",
-                "sneakers",
-                "footwear",
-                "loafer",
-                "loafers",
-            )
             or "shoe store" in prompt
             or "shoe shop" in prompt
             or "footwear store" in prompt
+            or has_word("shoe", "shoes", "sneaker", "sneakers", "footwear", "loafer", "loafers")
         )
+        if is_footwear and (
+            explicitly_forbids_footwear(analysis.raw_prompt) or has_strong_clothing_intent(analysis.raw_prompt)
+        ):
+            is_footwear = False
 
-        # Footwear MUST win (was incorrectly generating phone stores)
         if is_footwear:
             from app.generation.generators.footwear import generate_shoe_store
 
             return generate_shoe_store(requirements, plan)
+
+        if has_strong_clothing_intent(analysis.raw_prompt) or any(
+            k in type_id for k in ("fashion", "clothing", "boutique", "apparel")
+        ):
+            from app.generation.generators.luxury_fashion import generate_luxury_fashion
+
+            return generate_luxury_fashion(requirements, plan)
 
         is_blog = (
             any(k in type_id for k in ("blog", "magazine"))
@@ -50,6 +248,19 @@ class ComponentGenerator:
             from app.generation.generators.blog import generate_seo_blog
 
             return generate_seo_blog(requirements, plan)
+
+        is_portfolio = (
+            any(k in type_id for k in ("portfolio", "personal_brand"))
+            or has_word("portfolio", "freelancer")
+            or "developer portfolio" in prompt
+            or ("flutter" in prompt and "portfolio" in prompt)
+            or ("python" in prompt and "portfolio" in prompt)
+            or ("i am a" in prompt and "developer" in prompt and "portfolio" in prompt)
+        )
+        if is_portfolio:
+            from app.generation.generators.dev_portfolio import generate_dev_portfolio
+
+            return generate_dev_portfolio(requirements, plan)
 
         # Strict electronics signals only — never bare "mobile" (matches mobile-first)
         is_electronics = (
@@ -72,12 +283,48 @@ class ComponentGenerator:
 
             return generate_electronics_store(requirements, plan)
 
+        is_saas = (
+            any(k in type_id for k in ("saas", "ai_product", "fintech"))
+            or any(
+                s in prompt
+                for s in (
+                    "video ganerator",
+        "video generator",
+        "ai video",
+        "text to video",
+        "ai tool",
+        "ai app",
+        "ai product",
+        "image generator",
+        "saas",
+        "generator website",
+        "ganerator",
+    )
+            )
+            or ("generator" in prompt and any(k in prompt for k in ("video", "ai", "image")))
+            or ("ganerator" in prompt and "video" in prompt)
+        )
+        if is_saas:
+            from app.generation.generators.saas_product import generate_saas_product
+
+            return generate_saas_product(requirements, plan)
+
+        if any(
+            s in prompt
+            for s in ("book store", "bookstore", "book shop", "buy books", "read books")
+        ) or ("book" in prompt and "pdf" in prompt):
+            from app.generation.generators.bookstore import generate_bookstore
+
+            return generate_bookstore(requirements, plan)
+
         if any(
             k in type_id for k in ("fashion", "clothing", "boutique", "apparel")
         ) or has_word("clothing", "apparel", "boutique", "garment", "menswear", "womenswear") or any(
             s in prompt for s in ("cloth shop", "clothing store", "cloth store", "clothes shop")
         ):
-            return _generate_fashion_shop(requirements, plan)
+            from app.generation.generators.luxury_fashion import generate_luxury_fashion
+
+            return generate_luxury_fashion(requirements, plan)
 
         return _generate_generic(requirements, plan)
 
@@ -500,15 +747,63 @@ def sorted_sections(needed: set[str]) -> list[str]:
 def _tagline(prompt: str, website_type: str, brand: str = "") -> str:
     cleaned = re.sub(r"\s+", " ", prompt).strip()
     lower = cleaned.lower()
-    # Casual shop prompts → polished tagline
+    name = brand or "us"
+
+    # Instruction-like prompts must never become hero copy
+    instruction_markers = (
+        "i want",
+        "i need",
+        "give me",
+        "create",
+        "build",
+        "make",
+        "design",
+        "website",
+        "full website",
+        "please",
+        "attractive",
+    )
+    looks_like_request = sum(1 for m in instruction_markers if m in lower) >= 2 or lower.startswith(
+        ("i want", "i need", "give me", "please", "create ", "build ", "make ")
+    )
+
+    if any(k in lower for k in ("video generator", "ai video", "text to video", "video ganerator")):
+        return f"Turn ideas into stunning videos in seconds — with {name}."
+    if any(k in lower for k in ("image generator", "text to image", "ai image")):
+        return f"Generate beautiful images from a simple prompt — powered by {name}."
+    if any(k in lower for k in ("ai tool", "ai app", "ai product", "saas")):
+        return f"Ship faster with a modern product experience — meet {name}."
     if any(k in lower for k in ("cloth", "clothing", "fashion", "apparel", "boutique")):
-        name = brand or "our store"
         return f"Quality clothing and fashion for the whole family — welcome to {name}."
+    if any(k in lower for k in ("portfolio", "developer", "freelancer")):
+        return f"Selected work, skills, and ways to collaborate — {name}."
+    if any(k in lower for k in ("cafe", "café", "coffee")):
+        return f"Coffee, calm, and a place worth visiting — {name}."
+
+    if looks_like_request:
+        return f"A modern {website_type.lower()} experience built for real visitors."
+
     first = re.split(r"[.\n]", cleaned)[0].strip()
-    first = re.sub(r"^(create|build|make|design|i have|i own)\s+(a|an|the|one)?\s*", "", first, flags=re.I)
+    first = re.sub(
+        r"^(i want to|i need to|please|create|build|make|design|i have|i own)\s+(a|an|the|one)?\s*",
+        "",
+        first,
+        flags=re.I,
+    )
+    first = re.sub(
+        r"\b(give me|full website|website design|attractive|that website)\b",
+        "",
+        first,
+        flags=re.I,
+    )
+    first = re.sub(r"\s+", " ", first).strip(" .,!?'\"-")
     if len(first) > 120:
         first = first[:117] + "..."
-    if len(first) < 12 or first.lower().startswith("name was"):
+    if (
+        len(first) < 12
+        or first.lower().startswith("name was")
+        or any(m in first.lower() for m in ("give me", "website", "i want", "create "))
+    ):
         return f"A modern {website_type.lower()} experience."
     return first[0].upper() + first[1:]
 

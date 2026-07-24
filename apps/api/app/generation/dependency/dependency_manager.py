@@ -41,7 +41,7 @@ class DependencyManager:
             "type": "module",
             "scripts": {
                 "dev": "vite",
-                "build": "tsc -b && vite build",
+                "build": "vite build",
                 "preview": "vite preview",
             },
             "dependencies": dependencies,

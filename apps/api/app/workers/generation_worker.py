@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from datetime import datetime, timezone
@@ -12,15 +11,12 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import SessionLocal, engine
-from app.domain.paths import sanitize_relative_path
-from app.models.artifact import ArtifactFile
+from app.generation.orchestrator import Orchestrator
 from app.models.enums import GenerationStatus
 from app.models.generation import GenerationRun
 from app.models.project import Project
+from app.models.user import User
 import app.models  # noqa: F401
-from app.providers.ai.factory import get_ai_provider
-from app.providers.ai.schemas import FileSpec, GenerationRequest
-from app.providers.storage.local import LocalArtifactStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("generation_worker")
@@ -70,34 +66,8 @@ def claim_next_run(db) -> GenerationRun | None:
     return run
 
 
-def load_prior_files(storage: LocalArtifactStorage, project: Project) -> list[FileSpec] | None:
-    if project.current_run_id is None:
-        return None
-    paths = storage.list_files(project.id, project.current_run_id)
-    specs: list[FileSpec] = []
-    for path in paths[:40]:
-        try:
-            content = storage.read_file(project.id, project.current_run_id, path).decode("utf-8")
-        except (UnicodeDecodeError, FileNotFoundError):
-            continue
-        specs.append(FileSpec(path=path, content=content))
-    return specs or None
-
-
-def persist_files(db, storage: LocalArtifactStorage, run: GenerationRun, files: list[FileSpec]) -> None:
-    storage.delete_tree(run.project_id, run.id)
-    for spec in files:
-        path = sanitize_relative_path(spec.path)
-        data = spec.content.encode("utf-8")
-        storage.write_file(run.project_id, run.id, path, data)
-        digest = hashlib.sha256(data).hexdigest()
-        db.add(ArtifactFile(run_id=run.id, path=path, content_hash=digest, size_bytes=len(data)))
-
-
 def process_run(run_id) -> None:
-    settings = get_settings()
-    storage = LocalArtifactStorage(settings.artifact_root)
-    provider = get_ai_provider(settings)
+    """Process a claimed run through the same Orchestrator → Engine pipeline as /generate."""
     db = SessionLocal()
     try:
         run = db.get(GenerationRun, run_id)
@@ -111,24 +81,33 @@ def process_run(run_id) -> None:
             db.commit()
             return
 
-        prior = load_prior_files(storage, project)
-        result = provider.generate_site(
-            GenerationRequest(prompt=run.prompt, project_name=project.name, prior_files=prior)
+        user = db.get(User, run.user_id)
+        if user is None:
+            run.status = GenerationStatus.failed
+            run.error_message = "User missing"
+            run.finished_at = datetime.now(timezone.utc)
+            db.commit()
+            return
+
+        result = Orchestrator().run(
+            db=db,
+            user=user,
+            prompt=run.prompt,
+            project_id=project.id,
+            project_name=project.name,
+            existing_run_id=run.id,
         )
-        persist_files(db, storage, run, result.files)
-        run.status = GenerationStatus.succeeded
-        run.finished_at = datetime.now(timezone.utc)
-        run.error_message = None
-        project.current_run_id = run.id
-        db.commit()
-        logger.info("Run %s succeeded (%s files)", run.id, len(result.files))
+        file_count = len(result.get("files") or [])
+        logger.info("Run %s succeeded via Orchestrator (%s files)", run.id, file_count)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Run %s failed", run_id)
         db.rollback()
         run = db.get(GenerationRun, run_id)
         if run:
+            detail = getattr(exc, "detail", None)
+            message = str(detail) if detail is not None else str(exc)
             run.status = GenerationStatus.failed
-            run.error_message = str(exc)[:4000]
+            run.error_message = message[:4000]
             run.finished_at = datetime.now(timezone.utc)
             db.commit()
     finally:
@@ -140,9 +119,8 @@ def run_forever() -> None:
     if settings.is_sqlite:
         Base.metadata.create_all(bind=engine)
     logger.info(
-        "Generation worker started (poll=%ss, mock=%s, db=%s)",
+        "Generation worker started (poll=%ss, pipeline=orchestrator, db=%s)",
         settings.worker_poll_interval_seconds,
-        settings.ai_mock,
         "sqlite" if settings.is_sqlite else "postgres",
     )
     while True:

@@ -1,7 +1,25 @@
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { api } from '../lib/api'
+
+const starters = [
+  {
+    label: 'Portfolio',
+    prompt:
+      'I am a Flutter developer and Python also so I want to make one portfolio — give me the perfect portfolio template I can edit and make mine',
+  },
+  {
+    label: 'Clothing brand',
+    prompt:
+      'Create a premium luxury fashion clothing brand website called VELORA for men and women — clothing only, no shoes',
+  },
+  {
+    label: 'Café',
+    prompt:
+      'Warm modern coffee shop website with menu, story, and visit hours for a local café called Harbor Roast',
+  },
+]
 
 export function NewProjectPage() {
   const { token } = useAuth()
@@ -38,12 +56,11 @@ export function NewProjectPage() {
     setError(null)
     try {
       if (prompt.trim()) {
-        // Full pipeline: analyze → plan → generate → save
         const result = await api.generate(token, {
           prompt: prompt.trim(),
           project_name: name.trim() || undefined,
         })
-        navigate(`/projects/${result.project.id}`)
+        navigate(`/projects/${result.project.id}`, { replace: false })
         return
       }
       const project = await api.createProject(token, {
@@ -59,86 +76,81 @@ export function NewProjectPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <form
-        onSubmit={onSubmit}
-        className="space-y-5 rounded-2xl border border-[var(--line)] bg-[var(--bg-elevated)] p-6 md:p-8"
-      >
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Project name</span>
+    <div className="mx-auto grid max-w-4xl gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+      <form onSubmit={onSubmit} className="k-card space-y-4 p-6">
+        <div>
+          <p className="k-label">Brief</p>
+          <h3 className="k-section mt-1">Tell Ember what to build</h3>
+        </div>
+
+        <label className="block">
+          <span className="k-caption mb-1.5 block">Project name</span>
           <input
-            className="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3 py-2.5 outline-none ring-[var(--accent-2)] focus:ring-2"
+            className="k-input"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Auto-filled from analyzer if empty"
+            placeholder="Optional"
           />
         </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Description</span>
+        <label className="block">
+          <span className="k-caption mb-1.5 block">Note</span>
           <input
-            className="w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3 py-2.5 outline-none ring-[var(--accent-2)] focus:ring-2"
+            className="k-input"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional short summary"
+            placeholder="Optional"
           />
         </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Prompt</span>
+        <label className="block">
+          <span className="k-caption mb-1.5 block">Prompt</span>
           <textarea
-            className="min-h-36 w-full rounded-xl border border-[var(--line)] bg-[var(--bg)] px-3 py-2.5 outline-none ring-[var(--accent-2)] focus:ring-2"
+            className="k-input min-h-36"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Build a modern coffee shop website with a warm palette…"
+            placeholder="Describe the website…"
             required
           />
         </label>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={() => void onAnalyze()}
-            disabled={analyzing || !prompt.trim()}
-            className="rounded-xl border border-[var(--line)] px-4 py-2.5 text-sm font-medium disabled:opacity-60"
-          >
-            {analyzing ? 'Analyzing…' : 'Analyze prompt'}
+        {error && <p className="text-[var(--text-body)] text-[var(--danger)]">{error}</p>}
+
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="k-btn" disabled={analyzing || !prompt.trim()} onClick={() => void onAnalyze()}>
+            {analyzing ? 'Analyzing…' : 'Analyze'}
           </button>
-          <button
-            type="submit"
-            disabled={busy || !prompt.trim()}
-            className="rounded-xl bg-[var(--ink)] px-5 py-2.5 text-sm font-semibold text-[var(--bg)] disabled:opacity-60"
-          >
-            {busy ? 'Generating…' : 'Generate website'}
+          <button type="submit" className="k-btn k-btn-primary" disabled={busy || !prompt.trim()}>
+            {busy ? 'Building…' : 'Build'}
           </button>
-          <Link
-            to="/"
-            className="rounded-xl border border-[var(--line)] px-5 py-2.5 text-sm font-medium"
-          >
-            Cancel
-          </Link>
         </div>
+      </form>
 
-        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-
+      <div className="space-y-4">
+        <div className="k-card p-5">
+          <p className="k-label">Examples</p>
+          <ul className="mt-3 space-y-2">
+            {starters.map((s) => (
+              <li key={s.label}>
+                <button
+                  type="button"
+                  className="w-full rounded-[var(--radius)] border border-[var(--line)] px-3 py-2.5 text-left transition hover:bg-[var(--bg-muted)]"
+                  onClick={() => setPrompt(s.prompt)}
+                >
+                  <span className="block text-[var(--text-body)] font-medium">{s.label}</span>
+                  <span className="k-caption mt-0.5 line-clamp-2 block">{s.prompt}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
         {analysisPreview && (
-          <div className="rounded-xl border border-[var(--line)] bg-[var(--bg)] p-4 text-sm">
-            <p className="font-semibold">
-              Type: {String(analysisPreview.website_type)}{' '}
-              <span className="text-[var(--muted)]">
-                ({Math.round(Number(analysisPreview.confidence ?? 0) * 100)}% confidence)
-              </span>
-            </p>
-            <p className="mt-2 text-[var(--muted)]">
-              Pages: {Array.isArray(analysisPreview.pages) ? analysisPreview.pages.join(', ') : '—'}
-            </p>
-            <p className="mt-1 text-[var(--muted)]">
-              Components:{' '}
-              {Array.isArray(analysisPreview.components)
-                ? analysisPreview.components.join(', ')
-                : '—'}
-            </p>
+          <div className="k-card p-5">
+            <p className="k-label">Analysis</p>
+            <pre className="k-mono mt-3 max-h-64 overflow-auto text-[var(--muted)]">
+              {JSON.stringify(analysisPreview, null, 2)}
+            </pre>
           </div>
         )}
-      </form>
+      </div>
     </div>
   )
 }

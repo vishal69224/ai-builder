@@ -24,7 +24,19 @@ class PromptAnalyzer:
         matched, confidence = self._match_type(lowered)
 
         sections = self._extract_sections(text, lowered)
-        pages = self._extract_pages(lowered, matched, sections, text)
+        spoken = self._extract_spoken_pages(lowered)
+        pages_block = self._extract_pages_block(text)
+        pages_explicit = bool(spoken or pages_block)
+        if spoken:
+            pages = spoken
+        elif pages_block:
+            pages = pages_block
+            if "Home" not in pages:
+                pages.insert(0, "Home")
+            elif pages[0] != "Home":
+                pages = ["Home"] + [p for p in pages if p != "Home"]
+        else:
+            pages = self._extract_pages(lowered, matched, sections, text)
         components = self._extract_components(lowered, matched, sections)
         theme = self._extract_theme(lowered, matched)
         animations = self._extract_animations(lowered, matched)
@@ -34,7 +46,7 @@ class PromptAnalyzer:
         seo = self._extract_seo(lowered, matched, text)
         tags = self._extract_tags(lowered, matched)
         layout = self._choose_layout(matched, sections, pages)
-        if layout == "single_page":
+        if layout == "single_page" and not pages_explicit:
             pages = ["Home"]
         brand_name = self._extract_brand_name(text, matched)
         framework = "React"
@@ -61,6 +73,7 @@ class PromptAnalyzer:
             sections=sections,
             layout=layout,
             brand_name=brand_name,
+            pages_explicit=pages_explicit,
         )
 
     def _extract_color_label(self, lowered: str, theme: dict) -> str:
@@ -74,15 +87,27 @@ class PromptAnalyzer:
         return "Light"
 
     def _match_type(self, lowered: str) -> tuple[WebsiteType, float]:
+        from app.generation.understanding.intent_guards import (
+            explicitly_forbids_footwear,
+            has_strong_clothing_intent,
+            sanitize_prompt_for_matching,
+        )
+
+        # Match against sanitized text so "Avoid: Shoes" does not become shoe_store
+        match_text = sanitize_prompt_for_matching(lowered) or lowered
+
         # 1) Local trained ML classifier (no API key)
         try:
             from app.ai_model.classifier import LocalWebsiteClassifier
 
             clf = LocalWebsiteClassifier()
             if clf.is_ready:
-                ml_result = clf.predict(lowered)
+                ml_result = clf.predict(match_text)
                 if ml_result and ml_result[1] >= 0.15:
-                    return ml_result
+                    matched, conf = ml_result
+                    matched, conf = self._override_footwear_misroute(matched, conf, lowered)
+                    matched, conf = self._override_bookstore_misroute(matched, conf, lowered)
+                    return matched, conf
         except Exception:
             pass
 
@@ -91,13 +116,32 @@ class PromptAnalyzer:
         for wt in self.catalog:
             score = 0.0
             for kw in wt.keywords:
-                if kw in lowered:
+                if kw in match_text:
                     # Longer phrases weigh more
                     score += 1.0 + min(len(kw.split()), 4) * 0.35
             if score > 0:
                 # Prefer curated (no __style suffix depth) slightly
                 depth_penalty = wt.id.count("__") * 0.05
                 scores.append((score - depth_penalty, wt))
+
+        # Boost fashion when clothing intent is explicit
+        if has_strong_clothing_intent(lowered) or explicitly_forbids_footwear(lowered):
+            for i, (score, wt) in enumerate(scores):
+                if "fashion" in wt.id or "clothing" in wt.id or "apparel" in wt.id:
+                    scores[i] = (score + 5.0, wt)
+                if "shoe" in wt.id or "sneaker" in wt.id or "footwear" in wt.id:
+                    scores[i] = (score - 8.0, wt)
+
+        # Boost bookstore when book-store commerce intent is explicit
+        if any(
+            p in match_text
+            for p in ("book store", "bookstore", "book shop", "buy books", "read books", "download")
+        ) and ("book" in match_text):
+            for i, (score, wt) in enumerate(scores):
+                if "book" in wt.id:
+                    scores[i] = (score + 6.0, wt)
+                if wt.id.startswith("landing"):
+                    scores[i] = (score - 5.0, wt)
 
         if not scores:
             fallback = next(t for t in self.catalog if t.id == "landing_page")
@@ -107,10 +151,75 @@ class PromptAnalyzer:
         best_score, best = scores[0]
         # Normalize confidence into 0.4–0.98
         confidence = min(0.98, 0.4 + best_score / 8.0)
+        best, confidence = self._override_footwear_misroute(best, confidence, lowered)
+        best, confidence = self._override_bookstore_misroute(best, confidence, lowered)
         return best, confidence
+
+    def _override_bookstore_misroute(
+        self, matched: WebsiteType, confidence: float, original_lowered: str
+    ) -> tuple[WebsiteType, float]:
+        text = (original_lowered or "").lower()
+        bookstoreish = any(
+            p in text
+            for p in (
+                "book store",
+                "bookstore",
+                "book shop",
+                "bookshop",
+                "online book",
+                "buy books",
+                "read books",
+                "download the books",
+                "books pdf",
+            )
+        ) or (
+            "book" in text
+            and any(w in text for w in ("buy", "read", "search", "download", "pdf"))
+            and any(w in text for w in ("store", "shop", "online"))
+        )
+        if not bookstoreish:
+            return matched, confidence
+        tid = (matched.id or "").lower()
+        if "book" in tid:
+            return matched, max(confidence, 0.92)
+        book = next((t for t in self.catalog if t.id == "bookstore" or t.id.startswith("bookstore")), None)
+        if book is None:
+            book = next((t for t in self.catalog if "book" in t.id and "bookkeep" not in t.id), matched)
+        return book, max(confidence, 0.92)
+
+    def _override_footwear_misroute(
+        self, matched: WebsiteType, confidence: float, original_lowered: str
+    ) -> tuple[WebsiteType, float]:
+        from app.generation.understanding.intent_guards import (
+            explicitly_forbids_footwear,
+            has_strong_clothing_intent,
+            positive_footwear_intent,
+        )
+
+        tid = (matched.id or "").lower()
+        is_shoe_type = any(k in tid for k in ("shoe", "sneaker", "footwear"))
+        if is_shoe_type and (
+            explicitly_forbids_footwear(original_lowered)
+            or (has_strong_clothing_intent(original_lowered) and not positive_footwear_intent(original_lowered))
+        ):
+            fashion = next((t for t in self.catalog if t.id == "fashion_brand"), None)
+            if fashion is None:
+                fashion = next((t for t in self.catalog if "fashion" in t.id), matched)
+            return fashion, max(confidence, 0.9)
+        return matched, confidence
 
     def _extract_brand_name(self, original: str, matched: WebsiteType) -> str:
         """Pull a shop/brand name from casual prompts like 'name was Shree Hari…'."""
+        # Prefer: "shop name is Vishu Creation" / "my cloth shop name is …"
+        named = re.search(
+            r"(?:(?:cloth|clothing|fashion)\s+)?(?:shop|store|brand|boutique)\s+name\s+is\s+"
+            r"([A-Za-z][A-Za-z0-9&''.-]*(?:\s+[A-Za-z][A-Za-z0-9&''.-]*){0,3})",
+            original,
+            flags=re.I,
+        )
+        if named:
+            return self._clean_brand_candidate(named.group(1))
+
         # Prefer quoted brand first: called "MobileHub"
         q = re.search(
             r"(?:called|named|brand|store|shop)\s+[\"']([A-Za-z][^\"']{1,50})[\"']",
@@ -118,14 +227,14 @@ class PromptAnalyzer:
             flags=re.I,
         )
         if q:
-            return q.group(1).strip()
+            return self._clean_brand_candidate(q.group(1))
         q2 = re.search(r"[\"']([A-Za-z][A-Za-z0-9 &''.-]{1,40})[\"']", original)
         if q2:
-            candidate = q2.group(1).strip()
+            candidate = self._clean_brand_candidate(q2.group(1))
             if candidate.lower() not in {"home", "about", "contact", "shop"}:
                 return candidate
 
-        # ALLCAPS / Camel brand tokens: STEPX, Nike, …
+        # ALLCAPS / Camel brand tokens: STEPX, Nike, … (skip instruction words)
         for token in re.findall(r"\b([A-Z]{2,}[A-Za-z0-9]*)\b", original):
             if token.lower() not in {
                 "faq",
@@ -142,6 +251,8 @@ class PromptAnalyzer:
                 "theme",
                 "create",
                 "build",
+                "dark",
+                "new",
             }:
                 return token
 
@@ -151,7 +262,7 @@ class PromptAnalyzer:
             original,
         )
         if m_for:
-            return m_for.group(1).strip()
+            return self._clean_brand_candidate(m_for.group(1))
 
         patterns = [
             r"(?:shop\s+name|store\s+name|brand\s+name|name(?:d)?|called)\s+(?:is|was|of)?\s*[:\-]?\s*[\"']?([A-Za-z][A-Za-z0-9 &''.-]{2,60})",
@@ -162,86 +273,194 @@ class PromptAnalyzer:
             m = re.search(pat, original, flags=re.I)
             if not m:
                 continue
-            name = re.sub(r"\s+", " ", m.group(1)).strip(" .,!?'\"")
-            name = re.sub(
-                r"\b(website|site|online|please|thanks|for\s+me)\b.*$",
-                "",
-                name,
-                flags=re.I,
-            ).strip(" .,")
-            name = re.sub(r"^(it|the|a|an)\s+", "", name, flags=re.I).strip()
+            name = self._clean_brand_candidate(m.group(1))
             if len(name) >= 3:
                 return name.title() if not any(c.isupper() for c in name[1:]) else name
 
         # Prefer a publishable brand over catalog type labels for blogs
         if matched.id.startswith("blog") or "magazine" in matched.id:
             return "Insight Blog"
-        return matched.label
+        # Never use catalog type labels as the public brand — niche invent fills in
+        return ""
 
-    def _extract_pages_block(self, original: str) -> list[str]:
-        pages: list[str] = []
-        m = re.search(r"pages?\s*:", original, flags=re.I)
-        if not m:
-            return pages
+    def _normalize_page_name(self, raw: str) -> str | None:
+        token = re.sub(r"\s+", " ", (raw or "").strip().lower())
+        token = re.sub(r"^(?:and|or|plus|also|then|with)\s+", "", token)
+        token = re.sub(r"\s+pages?$", "", token).strip()
+        token = token.replace("-", " ")
+        if not token or len(token) > 32:
+            return None
         skip = {
-            "modern",
-            "minimal",
-            "responsive",
-            "seo",
-            "dark",
-            "theme",
-            "white",
-            "black",
-            "blue",
+            "three",
+            "two",
+            "one",
+            "four",
+            "five",
+            "six",
+            "seven",
+            "eight",
+            "nine",
+            "ten",
+            "web",
+            "landing",
+            "multi",
+            "single",
+            "this",
+            "that",
+            "the",
+            "a",
+            "an",
+            "each",
+            "every",
+            "first",
+            "second",
+            "third",
+            "main",
+            "new",
+            "my",
+            "our",
+            "some",
+            "more",
+            "extra",
+            "other",
+            "those",
+            "these",
+            "website",
+            "site",
+            "proper",
+            "luxury",
         }
-        rest = original[m.end() :]
-        for line in rest.splitlines():
-            raw = line.strip()
-            if not raw:
-                if pages:
-                    break
-                continue
-            if set(raw) <= {"=", "-", "_", "*"} or raw.startswith("==="):
-                break
-            if re.match(r"^[A-Z][A-Z0-9 ]{8,}$", raw) and " " in raw:
-                # e.g. HOME PAGE / POPULAR BRANDS
-                break
-            if "section" in raw.lower() and not raw.lower().startswith("-"):
-                break
-            name = re.sub(r"^[-*•\d.)\s]+", "", raw).strip()
-            if not name or len(name) > 40 or name.lower() in skip:
-                continue
-            if ":" in name and len(name.split()) <= 2:
-                break
-            titled = "FAQ" if name.lower() == "faq" else name.title()
-            if titled in {"About Us", "Aboutus"}:
-                titled = "About"
-            if titled not in pages:
-                pages.append(titled)
-            if len(pages) >= 12:
-                break
-        return pages
+        if token in skip or token.isdigit():
+            return None
+        aliases = {
+            "home": "Home",
+            "homepage": "Home",
+            "landing": "Home",
+            "about": "About",
+            "about us": "About",
+            "aboutus": "About",
+            "contact": "Contact",
+            "contact us": "Contact",
+            "contactus": "Contact",
+            "shop": "Shop",
+            "store": "Shop",
+            "products": "Shop",
+            "product": "Shop",
+            "lookbook": "Lookbook",
+            "gallery": "Gallery",
+            "collections": "Collections",
+            "collection": "Collections",
+            "men": "Men",
+            "women": "Women",
+            "login": "Login",
+            "sign in": "Login",
+            "signin": "Login",
+            "register": "Register",
+            "sign up": "Register",
+            "signup": "Register",
+            "blog": "Blog",
+            "pricing": "Pricing",
+            "faq": "FAQ",
+            "services": "Services",
+            "work": "Work",
+            "portfolio": "Portfolio",
+            "menu": "Menu",
+            "reservations": "Reservations",
+            "booking": "Booking",
+        }
+        compact = token.replace(" ", "")
+        if token in aliases:
+            return aliases[token]
+        if compact in {k.replace(" ", ""): v for k, v in aliases.items()}:
+            return {k.replace(" ", ""): v for k, v in aliases.items()}[compact]
+        # Reject junk phrases that aren't real pages
+        if any(w in token.split() for w in ("reference", "luxury", "proper", "create", "want", "need")):
+            return None
+        titled = token.title()
+        if titled in {"About Us", "Aboutus"}:
+            return "About"
+        return titled if 2 <= len(titled) <= 24 else None
 
-    def _choose_layout(self, matched: WebsiteType, sections: list[str], pages: list[str]) -> str:
-        # Stores / shops are always multi-page sites
-        if matched.category == "retail" or any(
-            k in matched.id for k in ("store", "shop", "ecommerce", "fashion", "mobile")
+    def _extract_spoken_pages(self, lowered: str) -> list[str] | None:
+        """Parse natural-language page lists like 'three page. home, contact and about'."""
+        found: list[str] = []
+
+        def _add(name: str | None) -> None:
+            if name and name not in found:
+                found.append(name)
+
+        # Left-to-right discovery preserves the user's listed order
+        for m in re.finditer(
+            r"\b(home(?:\s*page)?|about(?:\s+us)?(?:\s*page)?|contact(?:\s+us)?(?:\s*page)?|"
+            r"shop(?:\s*page)?|store(?:\s*page)?|lookbook(?:\s*page)?|gallery(?:\s*page)?|"
+            r"collections?(?:\s*page)?|men(?:\s*page)?|women(?:\s*page)?|"
+            r"login(?:\s*page)?|register(?:\s*page)?|blog(?:\s*page)?|pricing(?:\s*page)?|"
+            r"faq(?:\s*page)?|services?(?:\s*page)?|portfolio(?:\s*page)?|menu(?:\s*page)?)\b",
+            lowered,
         ):
-            return "multi_page"
-        if matched.category == "portfolio" or matched.id in {"personal_brand", "landing_page"}:
-            return "single_page"
-        if len(pages) <= 1 and len(sections) >= 5:
-            return "single_page"
-        if len(pages) <= 1:
-            return "single_page"
-        return "multi_page"
+            _add(self._normalize_page_name(m.group(1)))
+
+        # Explicit count: "3 pages" / "three pages"
+        count_m = re.search(
+            r"\b(\d+|one|two|three|four|five|six|seven|eight)\s+pages?\b",
+            lowered,
+        )
+        word_counts = {
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+        }
+        expected = None
+        if count_m:
+            raw = count_m.group(1)
+            expected = int(raw) if raw.isdigit() else word_counts.get(raw)
+
+        # "pages: home, about, contact"
+        listed = re.findall(
+            r"(?:pages?(?:\s+include|\s+are|:)\s+)([a-z0-9 ,&/-]+)",
+            lowered,
+        )
+        for chunk in listed:
+            for part in re.split(r"[,/]| and ", chunk):
+                _add(self._normalize_page_name(part))
+
+        # Require a clear page-intent signal
+        has_page_word = bool(re.search(r"\bpages?\b", lowered))
+        if not found or not has_page_word:
+            return None
+        if not expected and len(found) < 2:
+            return None
+
+        # If a count was given, keep Home + the next (n-1) pages in mention order
+        if expected and len(found) > expected:
+            rest = [p for p in found if p != "Home"]
+            found = (["Home"] if "Home" in found else []) + rest
+            found = found[:expected]
+
+        if "Home" not in found:
+            found.insert(0, "Home")
+        elif found[0] != "Home":
+            found = ["Home"] + [p for p in found if p != "Home"]
+
+        out: list[str] = []
+        for p in found:
+            if p not in out:
+                out.append(p)
+        if expected:
+            out = out[:expected]
+        return out[:12]
 
     def _extract_pages(
         self, lowered: str, matched: WebsiteType, sections: list[str], original: str = ""
     ) -> list[str]:
+        # Spoken / block extraction is handled in analyze(); this is the default path
         explicit = self._extract_pages_block(original) if original else []
         if explicit:
-            # Ensure Home first
             if "Home" not in explicit:
                 explicit.insert(0, "Home")
             elif explicit[0] != "Home":
@@ -285,7 +504,6 @@ class PromptAnalyzer:
         }
         for key, page in extras.items():
             if key in lowered and page not in pages:
-                # Avoid Blog+Articles duplicate for SEO/blog sites
                 if page == "Blog" and (
                     "Articles" in pages
                     or matched.id.startswith("blog")
@@ -294,20 +512,103 @@ class PromptAnalyzer:
                     continue
                 pages.append(page)
 
+        if any(k in lowered for k in ("sign in", "sign-in", "log in", "log-in")) and "Login" not in pages:
+            pages.append("Login")
+        if any(k in lowered for k in ("sign up", "sign-up", "register", "create account")) and "Register" not in pages:
+            pages.append("Register")
+
         for s in page_like:
             if s not in pages and s.lower() != "home":
                 pages.append(s)
 
-        listed = re.findall(
-            r"(?:pages?(?: include| are|:)?|include(?:s)?(?: the)? pages?)\s+([a-z0-9 ,&/-]+)",
-            lowered,
-        )
-        for chunk in listed:
-            for part in re.split(r"[,&/]| and ", chunk):
-                name = part.strip().title()
-                if name and name not in pages and len(name) < 40:
-                    pages.append(name)
         return pages
+
+    def _clean_brand_candidate(self, raw: str) -> str:
+        """Strip instructional tails so 'Vishu Creation so create…' → 'Vishu Creation'."""
+        name = re.sub(r"\s+", " ", (raw or "")).strip(" .,!?'\"")
+        # Cut at common instruction / filler boundaries
+        name = re.split(
+            r"\b(?:so|please|and|with|that|also|give|create|make|build|for|to|which|where|"
+            r"website|site|responsive|logo|attractive|customer|customers|sign\s*in|sign\s*up|"
+            r"easy|collection|branding|3d|view)\b",
+            name,
+            maxsplit=1,
+            flags=re.I,
+        )[0].strip(" .,!?'\"-")
+        # Keep at most 4 words for a brand mark
+        parts = [p for p in name.split() if p]
+        if len(parts) > 4:
+            parts = parts[:4]
+        name = " ".join(parts).strip()
+        if len(name) < 2:
+            return ""
+        # Title-case if mostly lowercase
+        if name.islower() or (name[:1].islower()):
+            return name.title()
+        return name
+
+    def _extract_pages_block(self, original: str) -> list[str]:
+        pages: list[str] = []
+        m = re.search(r"pages?\s*:", original, flags=re.I)
+        if not m:
+            return pages
+        skip = {
+            "modern",
+            "minimal",
+            "responsive",
+            "seo",
+            "dark",
+            "theme",
+            "white",
+            "black",
+            "blue",
+        }
+        rest = original[m.end() :]
+        for line in rest.splitlines():
+            raw = line.strip()
+            if not raw:
+                if pages:
+                    break
+                continue
+            if set(raw) <= {"=", "-", "_", "*"} or raw.startswith("==="):
+                break
+            if re.match(r"^[A-Z][A-Z0-9 ]{8,}$", raw) and " " in raw:
+                # e.g. HOME PAGE / POPULAR BRANDS
+                break
+            if "section" in raw.lower() and not raw.lower().startswith("-"):
+                break
+            name = re.sub(r"^[-*•\d.)\s]+", "", raw).strip()
+            if not name or len(name) > 40 or name.lower() in skip:
+                continue
+            if ":" in name and len(name.split()) <= 2:
+                break
+            titled = "FAQ" if name.lower() == "faq" else name.title()
+            if titled in {"About Us", "Aboutus"}:
+                titled = "About"
+            named = self._normalize_page_name(titled) or titled
+            if named not in pages:
+                pages.append(named)
+            if len(pages) >= 12:
+                break
+        return pages
+
+    def _choose_layout(self, matched: WebsiteType, sections: list[str], pages: list[str]) -> str:
+        # Explicit multi-page lists always win
+        if len(pages) >= 2:
+            return "multi_page"
+        # Retail / store types are always multi-page sites
+        if matched.category == "retail" or any(
+            k in matched.id
+            for k in ("store", "shop", "ecommerce", "fashion", "mobile", "book", "shoe", "sneaker")
+        ):
+            return "multi_page"
+        if matched.category == "portfolio" or matched.id in {"personal_brand", "landing_page"}:
+            return "single_page"
+        if len(pages) <= 1 and len(sections) >= 5:
+            return "single_page"
+        if len(pages) <= 1:
+            return "single_page"
+        return "multi_page"
 
     def _extract_sections(self, original: str, lowered: str) -> list[str]:
         """Parse explicit Sections: lists and common section keywords."""
@@ -551,6 +852,23 @@ class PromptAnalyzer:
 
     def _meta_description(self, original: str, matched: WebsiteType) -> str:
         cleaned = re.sub(r"\s+", " ", original).strip()
+        lower = cleaned.lower()
+        # Never publish raw build instructions as SEO description
+        if any(
+            m in lower
+            for m in (
+                "i want",
+                "give me",
+                "create ",
+                "build ",
+                "make ",
+                "website design",
+                "full website",
+            )
+        ):
+            if any(k in lower for k in ("video", "generator")):
+                return "AI video generator — turn prompts into polished videos in seconds."
+            return f"Discover {matched.label.lower()} — modern, fast, and ready to ship."
         if len(cleaned) > 140:
             cleaned = cleaned[:137] + "..."
         return cleaned or f"A modern {matched.label.lower()} website."

@@ -1,13 +1,15 @@
 import Editor from '@monaco-editor/react'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { GenerationStages } from '../components/GenerationStages'
 import { api, type FileEntry, type Generation, type Project } from '../lib/api'
 
 type Tab = 'preview' | 'code' | 'history'
 
 export function WorkspacePage() {
   const { id = '' } = useParams()
+  const navigate = useNavigate()
   const { token } = useAuth()
   const [project, setProject] = useState<Project | null>(null)
   const [runs, setRuns] = useState<Generation[]>([])
@@ -18,6 +20,8 @@ export function WorkspacePage() {
   const [tab, setTab] = useState<Tab>('preview')
   const [previewHtml, setPreviewHtml] = useState<string>('')
   const [livePreview, setLivePreview] = useState(false)
+  const [previewKey, setPreviewKey] = useState(0)
+  const [previewError, setPreviewError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [statusMsg, setStatusMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -27,6 +31,10 @@ export function WorkspacePage() {
     () => runs.find((r) => r.status === 'queued' || r.status === 'running'),
     [runs],
   )
+
+  const goToProjects = useCallback(() => {
+    navigate('/projects', { replace: false })
+  }, [navigate])
 
   const refresh = useCallback(async () => {
     if (!token || !id) return
@@ -39,6 +47,7 @@ export function WorkspacePage() {
       if (!selectedPath && fileList.length) {
         const preferred =
           fileList.find((f) => f.path === 'src/pages/HomePage.tsx') ??
+          fileList.find((f) => f.path === 'src/data/portfolio.ts') ??
           fileList.find((f) => f.path === 'src/App.tsx') ??
           fileList.find((f) => f.path === 'README.md') ??
           fileList[0]
@@ -46,10 +55,12 @@ export function WorkspacePage() {
       }
       const liveOk = await probeLivePreview(token, id)
       setLivePreview(liveOk)
-      if (!liveOk) {
-        const html = await fetchPreview(token, id)
-        setPreviewHtml(html)
-      }
+      const html = await fetchPreview(token, id)
+      setPreviewHtml(html)
+      if (liveOk) setPreviewError(null)
+    } else {
+      setLivePreview(false)
+      setPreviewHtml('')
     }
   }, [token, id, selectedPath])
 
@@ -105,6 +116,7 @@ export function WorkspacePage() {
     setBusy(true)
     setError(null)
     setStatusMsg('Running generation pipeline…')
+    setTab('preview')
     try {
       const result = await api.generate(token, {
         prompt: prompt.trim(),
@@ -115,9 +127,20 @@ export function WorkspacePage() {
           ? `Edit applied — ${result.files.length} files`
           : result.preview?.ok
             ? `Built ${result.files.length} files — live preview ready`
-            : `Generated ${result.files.length} files (static preview)`,
+            : `Generated ${result.files.length} files`,
       )
-      setLivePreview(Boolean(result.preview?.ok))
+      if (result.preview?.ok) {
+        setLivePreview(true)
+        setPreviewError(null)
+      } else {
+        setLivePreview(false)
+        setPreviewError(
+          typeof result.preview?.error === 'string'
+            ? result.preview.error
+            : 'Live build failed — showing static snapshot. Regenerate to retry.',
+        )
+      }
+      setPreviewKey((k) => k + 1)
       setPrompt('')
       setSelectedPath(null)
       await refresh()
@@ -135,8 +158,10 @@ export function WorkspacePage() {
     try {
       await api.writeFile(token, id, selectedPath, content)
       setStatusMsg(`Saved ${selectedPath}`)
-      const html = await fetchPreview(token, id)
-      setPreviewHtml(html)
+      setLivePreview(false)
+      const ok = await probeLivePreview(token, id)
+      setLivePreview(ok)
+      if (!ok) setPreviewHtml(await fetchPreview(token, id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed')
     } finally {
@@ -163,64 +188,89 @@ export function WorkspacePage() {
   }
 
   const language = useMemo(() => languageFor(selectedPath), [selectedPath])
+  const visibleFiles = useMemo(
+    () => files.filter((f) => !f.path.startsWith('.builder/') && f.path !== 'preview.html'),
+    [files],
+  )
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--line)] bg-white/80 px-5 py-3 backdrop-blur">
-        <div className="min-w-0">
-          <Link to="/" className="text-xs font-medium text-[var(--muted)] hover:text-[var(--ink)]">
-            ← Projects
-          </Link>
-          <h1 className="truncate text-lg font-semibold">{project?.name ?? 'Workspace'}</h1>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void onDownload()}
-            className="rounded-lg border border-[var(--line)] bg-white px-3 py-1.5 text-sm font-medium"
-            disabled={!project?.current_run_id}
-          >
-            Download ZIP
-          </button>
-          <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-[var(--muted)]">
-            Deploy: later
-          </span>
+    <div className="k-surface relative flex min-h-screen flex-col">
+      <div className="k-warm-bg opacity-30" aria-hidden />
+      <header className="relative z-40 sticky top-0 border-b border-[var(--line)] bg-[var(--topnav)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 md:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <button type="button" onClick={goToProjects} className="k-btn">
+              ← Projects
+            </button>
+            <div className="min-w-0">
+              <p className="k-label">Workspace</p>
+              <h1 className="k-section truncate">{project?.name ?? 'Workspace'}</h1>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`k-badge ${livePreview ? 'k-badge-accent' : 'k-badge-neutral'}`}>
+              {livePreview ? 'Live' : 'Static'}
+            </span>
+            <button
+              type="button"
+              onClick={() => void onDownload()}
+              className="k-btn"
+              disabled={!project?.current_run_id}
+            >
+              Download ZIP
+            </button>
+          </div>
         </div>
       </header>
 
-      <div className="grid flex-1 lg:grid-cols-[320px_1fr]">
-        <aside className="border-b border-[var(--line)] bg-white/70 p-4 lg:border-b-0 lg:border-r">
-          <form onSubmit={onGenerate} className="space-y-3">
-            <label className="block text-sm">
-              <span className="mb-1.5 block font-medium">Prompt</span>
-              <textarea
-                className="min-h-28 w-full rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-sm outline-none ring-[var(--accent-2)] focus:ring-2"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Refine the site or edit: Change the navbar to glassmorphism…"
-              />
-            </label>
+      <div className="grid flex-1 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)]">
+        <aside className="order-2 flex flex-col border-t border-[var(--line)] bg-[var(--bg)] p-5 lg:order-1 lg:border-r lg:border-t-0">
+          <form onSubmit={onGenerate} className="k-composer space-y-3 p-4">
+            <div>
+              <p className="k-label">Control</p>
+              <p className="k-caption mt-1">Describe a new site or refine this one.</p>
+            </div>
+            <textarea
+              className="k-input min-h-28 border-0 bg-transparent shadow-none focus:shadow-none"
+              style={{ boxShadow: 'none' }}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g. Flutter portfolio or clothing brand store"
+            />
             <button
               type="submit"
               disabled={busy || !prompt.trim()}
-              className="w-full rounded-lg bg-[var(--ink)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              className={`k-btn k-btn-primary w-full ${busy ? 'k-pulse-warm' : ''}`}
             >
-              {busy ? 'Submitting…' : latestActive ? 'Queue another run' : 'Generate / regenerate'}
+              {busy ? 'Generating…' : latestActive ? 'Queue another' : 'Generate'}
             </button>
           </form>
 
-          {statusMsg && <p className="mt-3 text-sm text-[var(--accent)]">{statusMsg}</p>}
-          {error && <p className="mt-3 text-sm text-[var(--danger)]">{error}</p>}
-          {latestActive && (
-            <p className="mt-3 text-sm text-[var(--muted)]">
-              Status: <strong>{latestActive.status}</strong>
+          {busy && <GenerationStages active tone="app" tinygptOnline={null} />}
+
+          {statusMsg && !busy && (
+            <p className="mt-3 rounded-[var(--radius)] border border-[var(--line)] bg-[var(--accent-soft)] px-3 py-2 text-[var(--text-body)] text-[var(--accent)]">
+              {statusMsg}
+            </p>
+          )}
+          {previewError && !livePreview && (
+            <p className="k-caption mt-3 rounded-[var(--radius)] border border-[var(--line)] px-3 py-2">
+              Preview note: {previewError.slice(0, 220)}
+            </p>
+          )}
+          {error && (
+            <p className="mt-3 rounded-[var(--radius)] border border-[var(--line)] px-3 py-2 text-[var(--text-body)] text-[var(--danger)]">
+              {error}
             </p>
           )}
 
-          <div className="mt-6">
-            <p className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">Files</p>
-            <ul className="mt-2 max-h-64 space-y-1 overflow-auto text-sm">
-              {files.map((f) => (
+          <div className="mt-6 flex-1">
+            <div className="flex items-center justify-between">
+              <p className="k-label">Files</p>
+              <span className="k-caption">{visibleFiles.length}</span>
+            </div>
+            <ul className="mt-2 max-h-[40vh] space-y-0.5 overflow-auto rounded-[var(--radius)] border border-[var(--line)] bg-[var(--bg)] p-1">
+              {visibleFiles.map((f) => (
                 <li key={f.path}>
                   <button
                     type="button"
@@ -228,28 +278,34 @@ export function WorkspacePage() {
                       setSelectedPath(f.path)
                       setTab('code')
                     }}
-                    className={`w-full rounded px-2 py-1 text-left hover:bg-slate-100 ${
-                      selectedPath === f.path ? 'bg-slate-100 font-medium' : ''
+                    className={`k-mono w-full rounded-[var(--radius)] px-2 py-1.5 text-left transition ${
+                      selectedPath === f.path
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                        : 'text-[var(--muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--ink)]'
                     }`}
                   >
                     {f.path}
                   </button>
                 </li>
               ))}
-              {!files.length && <li className="text-[var(--muted)]">No files yet</li>}
+              {!visibleFiles.length && (
+                <li className="k-caption px-2 py-3">Generate a site to see files</li>
+              )}
             </ul>
           </div>
         </aside>
 
-        <section className="flex min-h-[70vh] flex-col">
-          <div className="flex gap-1 border-b border-[var(--line)] bg-white/60 px-3 py-2">
+        <section className="order-1 flex min-h-[70vh] flex-col lg:order-2">
+          <div className="flex flex-wrap items-center gap-1 border-b border-[var(--line)] bg-[var(--bg-elevated)] px-3 py-2">
             {(['preview', 'code', 'history'] as Tab[]).map((t) => (
               <button
                 key={t}
                 type="button"
                 onClick={() => setTab(t)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium capitalize ${
-                  tab === t ? 'bg-[var(--ink)] text-white' : 'text-[var(--muted)] hover:bg-slate-100'
+                className={`rounded-[var(--radius)] px-3 py-1.5 text-[var(--text-body)] font-medium capitalize ${
+                  tab === t
+                    ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                    : 'text-[var(--muted)] hover:bg-[var(--bg-muted)] hover:text-[var(--ink)]'
                 }`}
               >
                 {t}
@@ -260,7 +316,7 @@ export function WorkspacePage() {
                 type="button"
                 onClick={() => void onSave()}
                 disabled={saving || !selectedPath}
-                className="ml-auto rounded-md border border-[var(--line)] bg-white px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+                className="k-btn ml-auto"
               >
                 {saving ? 'Saving…' : 'Save file'}
               </button>
@@ -268,55 +324,81 @@ export function WorkspacePage() {
           </div>
 
           {tab === 'preview' && (
-            livePreview && token ? (
-              <iframe
-                title="Live Preview"
-                className="min-h-[70vh] w-full flex-1 bg-white"
-                src={`${api.livePreviewUrl(id)}?access_token=${encodeURIComponent(token)}`}
-                sandbox="allow-scripts allow-same-origin"
-              />
-            ) : (
-              <iframe
-                title="Preview"
-                className="min-h-[70vh] w-full flex-1 bg-white"
-                srcDoc={previewHtml || emptyPreview}
-                sandbox="allow-scripts allow-same-origin"
-              />
-            )
+            <div className="relative min-h-[70vh] flex-1 bg-[var(--bg-muted)]">
+              {busy && (
+                <div className="absolute inset-0 z-10 flex items-center justify-center" style={{ background: 'color-mix(in oklab, var(--bg) 82%, transparent)' }}>
+                  <div className="k-card k-fade px-8 py-6 text-center">
+                    <div className="k-pulse-warm mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                      <span className="k-spin inline-block h-6 w-6 rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                    </div>
+                    <p className="mt-4 font-semibold text-[var(--ink)]">Building preview…</p>
+                    <p className="k-caption mt-1">Almost ready.</p>
+                  </div>
+                </div>
+              )}
+              {livePreview && token ? (
+                <iframe
+                  key={`live-${previewKey}-${id}`}
+                  title="Live Preview"
+                  className="min-h-[70vh] w-full flex-1 bg-white"
+                  src={`${api.livePreviewUrl(id)}?access_token=${encodeURIComponent(token)}&v=${previewKey}`}
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              ) : (
+                <iframe
+                  key={`static-${previewKey}`}
+                  title="Preview"
+                  className="min-h-[70vh] w-full flex-1 bg-white"
+                  srcDoc={previewHtml || (visibleFiles.length ? buildingPreview : emptyPreview)}
+                  sandbox="allow-scripts allow-same-origin"
+                />
+              )}
+            </div>
           )}
 
           {tab === 'code' && (
-            <div className="min-h-[70vh] flex-1">
+            <div className="min-h-[70vh] flex-1 overflow-hidden">
+              <div className="k-mono border-b border-[var(--line)] bg-[var(--bg-muted)] px-4 py-2 text-[var(--muted)]">
+                {selectedPath ?? 'Select a file'}
+              </div>
               <Editor
-                height="70vh"
-                theme="vs-light"
+                height="calc(70vh - 36px)"
+                theme="vs-dark"
                 language={language}
                 value={content}
                 onChange={(v) => setContent(v ?? '')}
-                options={{ fontSize: 14, minimap: { enabled: false }, wordWrap: 'on' }}
+                options={{ fontSize: 13, fontFamily: 'JetBrains Mono, monospace', minimap: { enabled: false }, wordWrap: 'on', padding: { top: 12 } }}
               />
             </div>
           )}
 
           {tab === 'history' && (
-            <ul className="space-y-3 p-5">
+            <ul className="space-y-2 p-4">
               {runs.map((run) => (
-                <li key={run.id} className="rounded-xl border border-[var(--line)] bg-white/80 p-4">
+                <li key={run.id} className="k-card p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    <span
+                      className={`k-badge ${
+                        run.status === 'succeeded' || run.status === 'completed'
+                          ? 'k-badge-success'
+                          : run.status === 'failed'
+                            ? 'k-badge-danger'
+                            : run.status === 'running' || run.status === 'queued'
+                              ? 'k-badge-accent'
+                              : 'k-badge-neutral'
+                      }`}
+                    >
                       {run.status}
                     </span>
-                    <span className="text-xs text-[var(--muted)]">
-                      {new Date(run.created_at).toLocaleString()}
-                    </span>
+                    <span className="k-caption">{new Date(run.created_at).toLocaleString()}</span>
                   </div>
-                  <p className="mt-2 text-sm leading-relaxed">{run.prompt}</p>
+                  <p className="mt-2 text-[var(--text-body)] leading-relaxed">{run.prompt}</p>
                   {run.error_message && (
-                    <p className="mt-2 text-sm text-[var(--danger)]">{run.error_message}</p>
+                    <p className="mt-2 text-[var(--text-body)] text-[var(--danger)]">{run.error_message}</p>
                   )}
                 </li>
               ))}
-              {!runs.length && <p className="text-[var(--muted)]">No generations yet.</p>}
+              {!runs.length && <p className="k-caption">No generations yet.</p>}
             </ul>
           )}
         </section>
@@ -325,8 +407,23 @@ export function WorkspacePage() {
   )
 }
 
-const emptyPreview = `<!doctype html><html><body style="font-family:sans-serif;padding:2rem;color:#627d98">
-Generate a site to see the live preview here.</body></html>`
+const emptyPreview = `<!doctype html><html><head><meta charset="utf-8"><style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600&display=swap');
+body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:'Plus Jakarta Sans',system-ui,sans-serif;background:#f6f1ea;color:#2a241e}
+.card{max-width:22rem;padding:2.25rem;text-align:center;border-radius:16px;border:1px solid #e2d8cc;background:#fffcf8;box-shadow:0 14px 36px -18px rgba(42,36,30,.2)}
+h1{margin:0;font-size:1.25rem;font-weight:600;letter-spacing:-.03em}p{margin:.75rem 0 0;color:#7a7066;font-size:.9rem;line-height:1.55}
+</style></head><body><div class="card"><h1>Ready when you are</h1>
+<p>Describe your idea on the left — Ember will build a site you can preview and ship.</p>
+</div></body></html>`
+
+const buildingPreview = `<!doctype html><html><head><meta charset="utf-8"><style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600&display=swap');
+body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:'Plus Jakarta Sans',system-ui,sans-serif;background:#f6f1ea;color:#2a241e}
+.card{max-width:22rem;padding:2.25rem;text-align:center;border-radius:16px;border:1px solid #e2d8cc;background:#fffcf8}
+h1{margin:0;font-size:1.15rem;font-weight:600}p{margin:.75rem 0 0;color:#7a7066;font-size:.9rem;line-height:1.55}
+</style></head><body><div class="card"><h1>Files ready</h1>
+<p>Lighting the preview… If this stays blank, generate once more.</p>
+</div></body></html>`
 
 async function probeLivePreview(token: string, projectId: string): Promise<boolean> {
   try {
@@ -334,7 +431,13 @@ async function probeLivePreview(token: string, projectId: string): Promise<boole
       method: 'GET',
       headers: { Accept: 'text/html' },
     })
-    return res.ok
+    if (!res.ok) return false
+    const text = await res.text()
+    if (text.includes('If you see this fallback')) return false
+    if (text.includes('Live React preview builds after generate') && !text.includes('id="root"')) {
+      return false
+    }
+    return text.includes('id="root"') || text.includes('/assets/') || text.length > 400
   } catch {
     return false
   }

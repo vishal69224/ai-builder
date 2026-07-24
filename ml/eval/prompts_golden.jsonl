@@ -1,0 +1,10 @@
+{"stage": "c1", "prompt": "Create a Tailwind React Button with primary and ghost variants"}
+{"stage": "c1", "prompt": "Build a ProductCard component with image, title, price, and wishlist"}
+{"stage": "c1", "prompt": "Navbar with logo, links Home Shop About Contact, and mobile menu"}
+{"stage": "c2", "prompt": "Full Shop page for Vishu Creation clothing brand with product grid and filters"}
+{"stage": "c2", "prompt": "Login page with email or phone toggle and password field"}
+{"stage": "c2", "prompt": "Lookbook gallery page with masonry fashion images"}
+{"stage": "c3", "prompt": "Complete responsive clothing website for Vishu Creation with Home Shop Lookbook Login Register About Contact"}
+{"stage": "c3", "prompt": "Flutter developer portfolio site with projects, skills, and contact form"}
+{"stage": "all", "prompt": "Luxury café landing page with menu section and reservation CTA"}
+{"stage": "all", "prompt": "SaaS analytics landing with hero, features, pricing, and signup"}

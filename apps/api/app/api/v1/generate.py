@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from app.core.deps import get_current_user, get_db
 from app.generation.analyzer.prompt_analyzer import analyze_prompt
 from app.generation.analyzer.website_types import catalog_stats
-from app.generation.engine import GenerationEngine
+from app.generation.orchestrator import Orchestrator
 from app.models.user import User
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -30,7 +30,7 @@ def generate_project(
     db: Session = Depends(get_db),
 ) -> dict:
     """Full generation pipeline: analyze → extract → plan → generate → validate → save."""
-    return GenerationEngine().run(
+    return Orchestrator().run(
         db=db,
         user=user,
         prompt=payload.prompt,

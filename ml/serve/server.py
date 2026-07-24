@@ -79,9 +79,18 @@ def create_app(default_ckpt: Path | None = None) -> FastAPI:
     app = FastAPI(title="TinyGPT Inference", version="0.1.0")
     state: dict = {"model": None, "tok": None, "meta": {}, "ckpt": None}
 
+    def resolve_ckpt() -> Path:
+        if default_ckpt and default_ckpt.exists():
+            return default_ckpt
+        for name in ("tinygpt-8m-c3", "tinygpt-8m-c2", "tinygpt-8m-c1"):
+            candidate = REPO / "checkpoints" / name / "best.pt"
+            if candidate.exists():
+                return candidate
+        return REPO / "checkpoints" / "tinygpt-8m-c1" / "best.pt"
+
     def ensure_loaded() -> None:
         if state["model"] is None:
-            ckpt = default_ckpt or (REPO / "checkpoints" / "tinygpt-8m-c1" / "best.pt")
+            ckpt = resolve_ckpt()
             model, tok, meta = load_model(ckpt)
             state.update(model=model, tok=tok, meta=meta, ckpt=str(ckpt))
 
@@ -113,6 +122,10 @@ def create_app(default_ckpt: Path | None = None) -> FastAPI:
             "raw_text": raw,
             "checkpoint": state["ckpt"],
             "mode": mode,
+            "stats": {
+                "file_count": len(files),
+                "raw_chars": len(raw),
+            },
         }
 
     async def _parse_body(request: Request) -> GenRequest:
@@ -136,8 +149,14 @@ def create_app(default_ckpt: Path | None = None) -> FastAPI:
 def main() -> None:
     import uvicorn
 
-    ckpt = REPO / "checkpoints" / "tinygpt-8m-c1" / "best.pt"
-    app = create_app(ckpt if ckpt.exists() else None)
+    # Prefer highest trained curriculum stage available
+    ckpt = None
+    for name in ("tinygpt-8m-c3", "tinygpt-8m-c2", "tinygpt-8m-c1"):
+        candidate = REPO / "checkpoints" / name / "best.pt"
+        if candidate.exists():
+            ckpt = candidate
+            break
+    app = create_app(ckpt)
     uvicorn.run(app, host="127.0.0.1", port=8100)
 
 

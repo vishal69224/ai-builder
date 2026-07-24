@@ -1,0 +1,45 @@
+{
+  "ok": false,
+  "stage": "c3",
+  "checkpoint": "/Users/artonestuser04/AI Builder/checkpoints/tinygpt-8m-c3/best.pt",
+  "device": "mps",
+  "meta": {
+    "device": "mps",
+    "epoch": 1,
+    "val_loss": 0.3764257291952769
+  },
+  "n": 4,
+  "format_valid_pct": 0.0,
+  "jsx_parse_pct": 50.0,
+  "gates": {
+    "format_valid_pct": 80,
+    "jsx_parse_pct": 50,
+    "mode": "site"
+  },
+  "details": [
+    {
+      "prompt": "Complete responsive clothing website for Vishu Creation with Home Shop Lookbook ",
+      "files": 1,
+      "format_valid": false,
+      "jsx_parse": false
+    },
+    {
+      "prompt": "Flutter developer portfolio site with projects, skills, and contact form",
+      "files": 1,
+      "format_valid": false,
+      "jsx_parse": true
+    },
+    {
+      "prompt": "Luxury caf\u00e9 landing page with menu section and reservation CTA",
+      "files": 1,
+      "format_valid": false,
+      "jsx_parse": true
+    },
+    {
+      "prompt": "SaaS analytics landing with hero, features, pricing, and signup",
+      "files": 1,
+      "format_valid": false,
+      "jsx_parse": false
+    }
+  ]
+}

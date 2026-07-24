@@ -128,4 +128,17 @@ export const api = {
       preview: { ok: boolean; preview_url: string | null; error?: string }
     }>('/api/v1/generate', { method: 'POST', body: JSON.stringify(data) }, token),
   livePreviewUrl: (projectId: string) => `${API_BASE}/api/v1/preview-live/${projectId}/`,
+  aiStatus: () =>
+    request<{
+      active_provider: string
+      description: string
+      tinygpt?: {
+        ok: boolean
+        hybrid?: boolean
+        checkpoint?: string
+        params?: number
+        error?: string
+      }
+      pipeline?: string[]
+    }>('/api/v1/ai/status'),
 }

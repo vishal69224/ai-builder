@@ -24,6 +24,19 @@ class Settings(BaseSettings):
     ai_mock: bool = True
     worker_poll_interval_seconds: float = 2.0
     cors_origins: str = "http://localhost:5173"
+    # Generation v2 flags — additive; legacy emitters stay default path
+    generation_pipeline: str = "legacy"  # legacy | v2
+    gen_v2_planner: bool = True  # Phase 1: write WebsitePlan artifact (safe)
+    gen_v2_theme: bool = True  # Phase 2: ThemeEngine → CSS variables
+    gen_v2_components: bool = True  # Phase 3: shell variants
+    gen_v2_content: bool = True  # Phase 4: niche copy
+    gen_v2_validator: bool = True  # Phase 5: semantic checks + niche dispatch
+    gen_v2_images: bool = True  # Phase 6: image collections
+    gen_v2_ai_planner: bool = False  # Phase 7: optional LLM plan enrich
+    # TinyGPT hybrid — localhost:8100; soft-fails to rule generators
+    tinygpt_base_url: str = "http://127.0.0.1:8100"
+    tinygpt_hybrid: bool = True
+    tinygpt_timeout_seconds: float = 45.0
 
     @property
     def cors_origin_list(self) -> list[str]:

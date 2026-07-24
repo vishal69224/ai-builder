@@ -1,0 +1,51 @@
+{
+  "ok": false,
+  "stage": "c2",
+  "checkpoint": "/Users/artonestuser04/AI Builder/checkpoints/tinygpt-8m-c2/best.pt",
+  "device": "mps",
+  "meta": {
+    "device": "mps",
+    "epoch": 4,
+    "val_loss": 0.050232794135808945
+  },
+  "n": 5,
+  "format_valid_pct": 40.0,
+  "jsx_parse_pct": 40.0,
+  "gates": {
+    "format_valid_pct": 85,
+    "jsx_parse_pct": 70,
+    "mode": "page"
+  },
+  "details": [
+    {
+      "prompt": "Full Shop page for Vishu Creation clothing brand with product grid and filters",
+      "files": 0,
+      "format_valid": false,
+      "jsx_parse": false
+    },
+    {
+      "prompt": "Login page with email or phone toggle and password field",
+      "files": 1,
+      "format_valid": true,
+      "jsx_parse": true
+    },
+    {
+      "prompt": "Lookbook gallery page with masonry fashion images",
+      "files": 0,
+      "format_valid": false,
+      "jsx_parse": false
+    },
+    {
+      "prompt": "Luxury caf\u00e9 landing page with menu section and reservation CTA",
+      "files": 0,
+      "format_valid": false,
+      "jsx_parse": false
+    },
+    {
+      "prompt": "SaaS analytics landing with hero, features, pricing, and signup",
+      "files": 1,
+      "format_valid": true,
+      "jsx_parse": true
+    }
+  ]
+}

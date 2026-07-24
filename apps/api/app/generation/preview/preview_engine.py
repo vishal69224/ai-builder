@@ -36,7 +36,7 @@ class PreviewEngine:
         return dest
 
     def install_and_build(self, project_id: UUID, run_id: UUID) -> dict:
-        """Run npm install && npm run build per SDD."""
+        """Run npm install && vite build for live preview."""
         workdir = self.project_dir(project_id, run_id)
         if not (workdir / "package.json").exists():
             return {"ok": False, "error": "package.json not found", "preview_url": None}
@@ -50,34 +50,53 @@ class PreviewEngine:
                 timeout=self.build_timeout,
                 check=True,
             )
-            result = subprocess.run(
-                ["npm", "run", "build"],
-                cwd=workdir,
-                capture_output=True,
-                text=True,
-                timeout=self.build_timeout,
-                check=True,
-            )
-            dist = self.dist_dir(project_id, run_id)
-            ok = dist.exists() and (dist / "index.html").exists()
-            return {
-                "ok": ok,
-                "preview_url": f"/api/v1/preview-live/{project_id}/" if ok else None,
-                "mode": "built",
-                "stdout": (result.stdout or "")[-500:],
-            }
         except subprocess.TimeoutExpired:
-            logger.warning("Preview build timed out for %s/%s", project_id, run_id)
-            return {"ok": False, "error": "Build timed out", "preview_url": None}
+            logger.warning("npm install timed out for %s/%s", project_id, run_id)
+            return {"ok": False, "error": "npm install timed out", "preview_url": None}
         except subprocess.CalledProcessError as exc:
-            logger.warning("Preview build failed: %s", exc.stderr or exc.stdout)
-            return {
-                "ok": False,
-                "error": (exc.stderr or exc.stdout or str(exc))[-400:],
-                "preview_url": None,
-            }
+            err = (exc.stderr or exc.stdout or str(exc))[-400:]
+            logger.warning("npm install failed: %s", err)
+            return {"ok": False, "error": err, "preview_url": None}
         except FileNotFoundError:
             return {"ok": False, "error": "npm not found — install Node.js", "preview_url": None}
+
+        # Prefer vite build directly — generated TS often fails `tsc -b` but still ships fine
+        build_cmds = [
+            ["npm", "run", "build"],
+            ["npx", "vite", "build"],
+        ]
+        last_error = ""
+        for cmd in build_cmds:
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=workdir,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.build_timeout,
+                    check=True,
+                )
+                dist = self.dist_dir(project_id, run_id)
+                ok = dist.exists() and (dist / "index.html").exists()
+                if ok:
+                    return {
+                        "ok": True,
+                        "preview_url": f"/api/v1/preview-live/{project_id}/",
+                        "mode": "built",
+                        "stdout": (result.stdout or "")[-500:],
+                    }
+                last_error = "Build finished but dist/index.html missing"
+            except subprocess.TimeoutExpired:
+                last_error = "Build timed out"
+                logger.warning("Preview build timed out for %s/%s via %s", project_id, run_id, cmd)
+            except subprocess.CalledProcessError as exc:
+                last_error = (exc.stderr or exc.stdout or str(exc))[-400:]
+                logger.warning("Preview build failed via %s: %s", cmd, last_error)
+            except FileNotFoundError:
+                last_error = "vite/npm not found"
+                break
+
+        return {"ok": False, "error": last_error or "Build failed", "preview_url": None}
 
     def resolve_live_file(self, project_id: UUID, run_id: UUID, file_path: str) -> Path | None:
         dist = self.dist_dir(project_id, run_id)

@@ -17,7 +17,7 @@ REPO = ML.parent
 sys.path.insert(0, str(ML))
 
 from model.tinygpt import TinyGPT, TinyGPTConfig
-from train.dataset import ShardDataset, collate_pad
+from train.dataset import MixedReplayDataset, ShardDataset, collate_pad, shard_dir_from_manifest
 from tokenizer.wrapper import TinyGPTTokenizer
 
 
@@ -34,7 +34,37 @@ def load_vocab_size() -> int:
     return json.loads(meta.read_text())["vocab_size"]
 
 
-def train_stage(config_path: Path) -> Path:
+# Curriculum order — each stage, by default, initializes from the previous
+# stage's best checkpoint instead of random weights. This is what makes it
+# an actual curriculum (component -> page -> site) rather than three
+# independently-trained models that happen to share an architecture.
+STAGE_ORDER = {"c1": None, "c2": "c1", "c3": "c2"}
+
+
+def _default_init_checkpoint(stage: str) -> Path | None:
+    prev = STAGE_ORDER.get(stage)
+    if prev is None:
+        return None
+    candidate = REPO / "checkpoints" / f"tinygpt-8m-{prev}" / "best.pt"
+    return candidate if candidate.exists() else None
+
+
+def load_pretrained_weights(model: TinyGPT, ckpt_path: Path, device: torch.device) -> None:
+    """Initialize `model` from a prior stage's checkpoint. Loads with
+    strict=False so it still works if vocab size or a shape changed between
+    stages (e.g. tokenizer retrained) — mismatched tensors are skipped
+    rather than crashing the run."""
+    state = torch.load(ckpt_path, map_location=device)
+    sd = state["model"] if isinstance(state, dict) and "model" in state else state
+    missing, unexpected = model.load_state_dict(sd, strict=False)
+    print(
+        f"Initialized from {ckpt_path.relative_to(REPO)} "
+        f"(missing={len(missing)}, unexpected={len(unexpected)}, "
+        f"prior best_val={state.get('val_loss', 'n/a')})"
+    )
+
+
+def train_stage(config_path: Path, *, init_from: Path | None = None, from_scratch: bool = False) -> Path:
     cfg_yaml = yaml.safe_load(config_path.read_text())
     stage = cfg_yaml["stage"]
     max_seq = int(cfg_yaml["max_seq_len"])
@@ -52,10 +82,37 @@ def train_stage(config_path: Path) -> Path:
     model_cfg = TinyGPTConfig(vocab_size=vocab_size, max_seq_len=max_seq)
     device = get_device()
     model = TinyGPT(model_cfg).to(device)
-    print(f"Device={device} params={model.param_count():,} vocab={vocab_size} stage={stage}")
 
-    train_ds = ShardDataset(shard_dir, "train", max_seq_len=max_seq)
+    if from_scratch:
+        print(f"Device={device} params={model.param_count():,} vocab={vocab_size} stage={stage} (from scratch)")
+    else:
+        ckpt_to_load = init_from or _default_init_checkpoint(stage)
+        if ckpt_to_load:
+            load_pretrained_weights(model, ckpt_to_load, device)
+        print(f"Device={device} params={model.param_count():,} vocab={vocab_size} stage={stage}")
+
+    current_train = ShardDataset(shard_dir, "train", max_seq_len=max_seq)
+    train_ds: ShardDataset | MixedReplayDataset = current_train
     val_ds = ShardDataset(shard_dir, "val", max_seq_len=max_seq)
+
+    # Curriculum replay: mix prior-stage shards so C2/C3 don't forget C1 patterns
+    replay_ratio = float(cfg_yaml.get("replay_prev_ratio") or 0.0)
+    replay_manifests = list(cfg_yaml.get("replay_manifests") or [])
+    if replay_ratio > 0 and replay_manifests:
+        replay_sets: list[ShardDataset] = []
+        for m in replay_manifests:
+            rdir = shard_dir_from_manifest(REPO, m)
+            if (rdir / "train_tokens.npy").exists():
+                replay_sets.append(ShardDataset(rdir, "train", max_seq_len=max_seq))
+            else:
+                print(f"  warn: replay shard missing at {rdir}")
+        if replay_sets:
+            train_ds = MixedReplayDataset(current_train, replay_sets, replay_ratio=replay_ratio)
+            print(
+                f"  replay mixing enabled: ratio={replay_ratio} "
+                f"pools={len(replay_sets)} current_n={len(current_train)}"
+            )
+
     pad_id = TinyGPTTokenizer().token_to_id("<|pad|>") or 2
 
     train_loader = DataLoader(
@@ -197,4 +254,14 @@ if __name__ == "__main__":
         quick = ML / "configs" / f"_quick_{stage}.yaml"
         quick.write_text(yaml.dump(data), encoding="utf-8")
         config = quick
-    train_stage(config)
+
+    # Curriculum init: by default c2/c3 auto-load the previous stage's best
+    # checkpoint (see STAGE_ORDER). --from-scratch disables that. --init-from=
+    # overrides it with an explicit checkpoint path.
+    from_scratch = "--from-scratch" in sys.argv
+    init_from = None
+    for a in sys.argv:
+        if a.startswith("--init-from="):
+            init_from = Path(a.split("=", 1)[1])
+
+    train_stage(config, init_from=init_from, from_scratch=from_scratch)

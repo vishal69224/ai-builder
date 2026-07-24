@@ -22,6 +22,37 @@ class ProjectPlanner:
             if "articles" in lower_pages and "blog" in lower_pages:
                 pages = [p for p in pages if p.lower() != "blog"]
 
+        # Clothing + auth: only expand when user did not specify exact pages
+        is_clothing = (
+            "cloth" in type_id
+            or "fashion" in type_id
+            or "apparel" in prompt
+            or "clothing" in prompt
+            or "fashion" in prompt
+        )
+        pages_explicit = bool(getattr(analysis, "pages_explicit", False))
+        if is_clothing and not pages_explicit:
+            for extra in ("Shop", "Lookbook", "About", "Contact"):
+                if extra not in pages:
+                    pages.append(extra)
+            if any(k in prompt for k in ("sign in", "sign up", "login", "register", "signup", "signin")):
+                for extra in ("Login", "Register"):
+                    if extra not in pages:
+                        pages.append(extra)
+
+        # Bookstore commerce IA when prompt didn't lock exact pages
+        is_bookstore = (
+            "book" in type_id
+            or "bookstore" in type_id
+            or "book store" in prompt
+            or "bookstore" in prompt
+            or ("book" in prompt and any(w in prompt for w in ("buy", "read", "pdf", "download", "search")))
+        )
+        if is_bookstore and not pages_explicit:
+            for extra in ("Browse", "Library", "Cart", "About"):
+                if extra not in pages:
+                    pages.append(extra)
+
         routes = []
         for page in pages:
             slug = "/" if page.lower() == "home" else "/" + page.lower().replace(" ", "-")
