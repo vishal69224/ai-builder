@@ -16,6 +16,17 @@ Rules:
 - Paths must be relative, no .. segments
 """
 
+EDIT_SYSTEM_PROMPT = """You are an expert React + Tailwind engineer editing an existing Vite website.
+Return ONLY valid JSON:
+{"summary":"short string","files":[{"path":"relative/path","content":"full updated file contents"}]}
+Rules:
+- Only return files you changed (full file content for each)
+- Keep TypeScript/TSX valid
+- Preserve brand names and routes unless the user asks to change them
+- Prefer visual polish: spacing, typography, hero, CTAs, colors
+- Do not wrap in markdown fences
+"""
+
 
 class OpenAICompatibleProvider:
     def __init__(self, base_url: str, api_key: str, model: str) -> None:
@@ -43,7 +54,35 @@ class OpenAICompatibleProvider:
                 {"role": "user", "content": json.dumps(user_content)},
             ],
         }
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        return self._complete(payload)
+
+    def edit_site(self, request: GenerationRequest) -> GenerationResult:
+        prior = request.prior_files or []
+        user_content = {
+            "project_name": request.project_name,
+            "edit_instruction": request.prompt,
+            "files": [{"path": f.path, "content": f.content[:12000]} for f in prior[:24]],
+        }
+        payload = {
+            "model": self.model,
+            "temperature": 0.3,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": EDIT_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(user_content)},
+            ],
+        }
+        return self._complete(payload)
+
+    def _complete(self, payload: dict) -> GenerationResult:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        # OpenRouter recommends these headers
+        if "openrouter.ai" in self.base_url:
+            headers["HTTP-Referer"] = "http://localhost:5173"
+            headers["X-Title"] = "AI Website Builder"
         with httpx.Client(timeout=120.0) as client:
             response = client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
             response.raise_for_status()

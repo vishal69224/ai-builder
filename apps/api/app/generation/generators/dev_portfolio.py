@@ -117,36 +117,37 @@ def generate_dev_portfolio(requirements: StructuredRequirements, plan: ProjectPl
     name = _display_name(analysis.brand_name, plan.project_name, prompt)
     role = _role_line(lowered)
     skills = _skills(lowered)
-    projects = _projects(lowered)
-    tagline = f"{role} building polished apps, APIs, and products you can ship."
+    projects = _projects(lowered, name)
+    email = _email_from_name(name)
+    tagline = f"{role} crafting polished apps, APIs, and products that ship."
 
     data = {
         "name": name,
         "role": role,
         "tagline": tagline,
-        "email": "hello@example.com",
+        "email": email,
         "location": "Remote · Worldwide",
+        "availability": "Open to freelance & full-time",
         "style": style.id,
-        "styleLabel": style.label,
         "skills": skills,
         "stack": _stack(lowered),
         "experience": [
             {
-                "role": "Flutter Developer",
+                "role": "Flutter Developer" if "flutter" in lowered else "Product Engineer",
                 "org": "Product Studio",
                 "period": "2023 — Present",
                 "points": [
-                    "Shipped cross-platform mobile apps with Flutter and clean architecture",
-                    "Integrated REST/GraphQL APIs, auth, and offline-first local storage",
-                    "Partnered with design to deliver motion-rich, accessible UI",
+                    "Shipped cross-platform apps with clean architecture and strong UI craft",
+                    "Integrated REST APIs, auth flows, and offline-first local storage",
+                    "Partnered with design to deliver motion-rich, accessible interfaces",
                 ],
             },
             {
-                "role": "Python Engineer",
+                "role": "Python Engineer" if "python" in lowered else "Backend Engineer",
                 "org": "Platform Team",
                 "period": "2021 — 2023",
                 "points": [
-                    "Built FastAPI services, workers, and data pipelines",
+                    "Built FastAPI services, workers, and reliable data pipelines",
                     "Automated reporting and CI helpers used across the squad",
                     "Improved API latency and observability for production workloads",
                 ],
@@ -154,9 +155,9 @@ def generate_dev_portfolio(requirements: StructuredRequirements, plan: ProjectPl
         ],
         "projects": projects,
         "about": (
-            f"I'm {name}, a {role.lower()} who cares about craft: clear architecture, "
-            "fast feedback loops, and interfaces people enjoy using. This template is ready to "
-            "edit — swap projects, skills, and copy to make it yours."
+            f"I'm {name}, a {role.lower()} focused on craft: clear architecture, "
+            "fast feedback loops, and interfaces people enjoy using. I turn messy product "
+            "ideas into reliable software you can ship with confidence."
         ),
     }
 
@@ -309,25 +310,38 @@ def _stack(lowered: str) -> list[str]:
     return stack or ["Flutter", "Python", "Git"]
 
 
-def _projects(lowered: str) -> list[dict]:
+def _email_from_name(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", ".", name.lower()).strip(".")
+    return f"{slug or 'hello'}@studio.dev"
+
+
+def _projects(lowered: str, name: str) -> list[dict]:
+    gradients = [
+        "from-cyan-500/80 via-indigo-500/70 to-slate-900",
+        "from-orange-400/80 via-rose-500/60 to-slate-900",
+        "from-emerald-400/70 via-teal-600/60 to-slate-900",
+    ]
     base = [
         {
-            "title": "Shoply — Flutter Commerce App",
+            "title": "Shoply — Commerce App",
             "blurb": "Cross-platform storefront with carts, payments hooks, and offline cache.",
             "tags": ["Flutter", "Firebase", "Stripe"],
             "href": "#contact",
+            "gradient": gradients[0],
         },
         {
-            "title": "Pulse API — FastAPI Platform",
+            "title": "Pulse API — Platform",
             "blurb": "Typed Python services with JWT auth, background jobs, and OpenAPI docs.",
             "tags": ["Python", "FastAPI", "PostgreSQL"],
             "href": "#contact",
+            "gradient": gradients[1],
         },
         {
-            "title": "Devfolio — This Template",
-            "blurb": "Editable portfolio starter — swap copy, projects, and skills to make it yours.",
+            "title": f"{name.split()[0]} Studio — Case Work",
+            "blurb": "Selected product UI, dashboards, and launch sites built end to end.",
             "tags": ["React", "Tailwind", "Vite"],
             "href": "#projects",
+            "gradient": gradients[2],
         },
     ]
     if "flutter" not in lowered:
@@ -336,6 +350,7 @@ def _projects(lowered: str) -> list[dict]:
             "blurb": "Product UI with smooth navigation and API-backed screens.",
             "tags": ["Mobile", "UI", "API"],
             "href": "#contact",
+            "gradient": gradients[0],
         }
     if "python" not in lowered:
         base[1] = {
@@ -343,6 +358,7 @@ def _projects(lowered: str) -> list[dict]:
             "blurb": "Scripts and services that remove repetitive ops work.",
             "tags": ["Automation", "CLI"],
             "href": "#contact",
+            "gradient": gradients[1],
         }
     return base
 
@@ -421,9 +437,9 @@ def _navbar(name: str, style: StylePack) -> GeneratedFile:
 def _hero(style: StylePack) -> GeneratedFile:
     if style.hero_layout == "stack":
         body = (
-            "      <div className=\"relative mx-auto max-w-4xl px-4 py-20 md:py-28\">\n"
-            f"        <p className=\"text-xs font-semibold uppercase tracking-[0.28em] {style.accent}\">{{portfolio.styleLabel}}</p>\n"
-            f"        <h1 className=\"mt-5 text-5xl {style.display_weight} tracking-tight {style.ink} md:text-6xl\">{{portfolio.name}}</h1>\n"
+            "      <div className=\"relative mx-auto max-w-4xl px-4 py-24 md:py-32\">\n"
+            f"        <p className=\"text-xs font-semibold uppercase tracking-[0.28em] {style.accent}\">{{portfolio.availability}}</p>\n"
+            f"        <h1 className=\"mt-5 text-5xl {style.display_weight} tracking-tight {style.ink} md:text-7xl\">{{portfolio.name}}</h1>\n"
             f"        <p className=\"mt-4 text-xl {style.accent}\">{{portfolio.role}}</p>\n"
             f"        <p className=\"mt-6 max-w-2xl text-lg leading-relaxed {style.muted}\">{{portfolio.tagline}}</p>\n"
             "        <div className=\"mt-10 flex flex-wrap gap-3\">\n"
@@ -438,7 +454,7 @@ def _hero(style: StylePack) -> GeneratedFile:
             f"        <div className=\"{style.panel} overflow-hidden p-8 md:p-12\">\n"
             "          <div className=\"grid gap-8 md:grid-cols-[1.4fr_0.6fr] md:items-end\">\n"
             "            <div>\n"
-            f"              <p className=\"text-xs font-bold uppercase tracking-[0.24em] {style.accent}\">{{portfolio.styleLabel}}</p>\n"
+            f"              <p className=\"text-xs font-bold uppercase tracking-[0.24em] {style.accent}\">{{portfolio.availability}}</p>\n"
             f"              <h1 className=\"mt-4 text-4xl {style.display_weight} tracking-tight sm:text-6xl\">{{portfolio.name}}</h1>\n"
             f"              <p className=\"mt-4 text-lg {style.muted}\">{{portfolio.tagline}}</p>\n"
             "              <div className=\"mt-8 flex flex-wrap gap-3\">\n"
@@ -449,7 +465,7 @@ def _hero(style: StylePack) -> GeneratedFile:
             f"            <div className=\"{style.accent_soft} {style.radius} p-6 text-sm\">\n"
             "              <p className=\"font-bold\">{portfolio.role}</p>\n"
             "              <p className=\"mt-2 opacity-90\">{portfolio.location}</p>\n"
-            "              <p className=\"mt-4 text-xs opacity-80\">Edit src/data/portfolio.ts</p>\n"
+            "              <a href={`mailto:${portfolio.email}`} className=\"mt-4 inline-block text-xs font-semibold underline-offset-4 hover:underline\">{portfolio.email}</a>\n"
             "            </div>\n"
             "          </div>\n"
             "        </div>\n"
@@ -468,9 +484,9 @@ def _hero(style: StylePack) -> GeneratedFile:
         )
         body = (
             f"{glow}"
-            "      <div className=\"relative mx-auto grid max-w-5xl gap-10 px-4 py-20 md:grid-cols-[1.2fr_0.8fr] md:py-28\">\n"
+            "      <div className=\"relative mx-auto grid max-w-5xl gap-10 px-4 py-24 md:grid-cols-[1.2fr_0.8fr] md:py-32\">\n"
             "        <div>\n"
-            f"          <p className=\"text-xs font-semibold uppercase tracking-[0.28em] {style.accent}\">{{portfolio.styleLabel}}</p>\n"
+            f"          <p className=\"text-xs font-semibold uppercase tracking-[0.28em] {style.accent}\">{{portfolio.availability}}</p>\n"
             f"          <h1 className=\"mt-4 text-4xl {style.display_weight} tracking-tight {style.ink} sm:text-5xl md:text-6xl\">{{portfolio.name}}</h1>\n"
             f"          <p className=\"mt-3 text-lg {style.accent}\">{{portfolio.role}}</p>\n"
             f"          <p className=\"mt-5 max-w-xl text-base leading-relaxed {style.muted}\">{{portfolio.tagline}}</p>\n"
@@ -487,18 +503,12 @@ def _hero(style: StylePack) -> GeneratedFile:
             "          <ul className=\"mt-4 space-y-3 text-sm\">\n"
             f"            <li className=\"flex justify-between gap-4 border-b {style.border} pb-3\"><span className=\"{style.muted}\">Focus</span><span>{{portfolio.role}}</span></li>\n"
             f"            <li className=\"flex justify-between gap-4 border-b {style.border} pb-3\"><span className=\"{style.muted}\">Location</span><span>{{portfolio.location}}</span></li>\n"
-            "            <li className=\"flex justify-between gap-4\"><span className={style.muted}>Open to</span><span>Freelance · Full-time</span></li>\n"
+            f"            <li className=\"flex justify-between gap-4\"><span className=\"{style.muted}\">Open to</span><span>Freelance · Full-time</span></li>\n"
             "          </ul>\n"
-            f"          <p className=\"mt-6 text-xs leading-relaxed {style.muted}\">Edit <code>src/data/portfolio.ts</code> to personalize.</p>\n"
+            f"          <a href={{`mailto:${{portfolio.email}}`}} className=\"mt-6 inline-block text-sm {style.accent} hover:underline\">{{portfolio.email}}</a>\n"
             "        </div>\n"
             "      </div>\n"
         )
-
-    # Fix the Open to line - I mixed style.muted incorrectly
-    body = body.replace(
-        "<li className=\"flex justify-between gap-4\"><span className={style.muted}>Open to</span><span>Freelance · Full-time</span></li>",
-        f'<li className="flex justify-between gap-4"><span className="{style.muted}">Open to</span><span>Freelance · Full-time</span></li>',
-    )
 
     return GeneratedFile(
         path="src/components/PortfolioHero.tsx",
@@ -524,16 +534,16 @@ def _sections(style: StylePack) -> GeneratedFile:
             "import { PortfolioButton } from './PortfolioButton'\n\n"
             "export function AboutSection() {\n"
             "  return (\n"
-            "    <section id=\"about\" className=\"mx-auto max-w-5xl px-4 py-16\">\n"
+            "    <section id=\"about\" className=\"mx-auto max-w-5xl px-4 py-20\">\n"
             f"      <p className=\"text-xs font-semibold uppercase tracking-[0.22em] {style.accent}\">About</p>\n"
-            f"      <h2 className=\"mt-3 text-3xl {style.display_weight} tracking-tight\">Built to be edited</h2>\n"
+            f"      <h2 className=\"mt-3 text-3xl {style.display_weight} tracking-tight\">Craft over clutter</h2>\n"
             f"      <p className=\"mt-5 max-w-3xl text-base leading-relaxed {style.muted}\">{{portfolio.about}}</p>\n"
             "    </section>\n"
             "  )\n"
             "}\n\n"
             "export function SkillsSection() {\n"
             "  return (\n"
-            "    <section id=\"skills\" className=\"mx-auto max-w-5xl px-4 py-16\">\n"
+            "    <section id=\"skills\" className=\"mx-auto max-w-5xl px-4 py-20\">\n"
             f"      <p className=\"text-xs font-semibold uppercase tracking-[0.22em] {style.accent}\">Skills</p>\n"
             f"      <h2 className=\"mt-3 text-3xl {style.display_weight} tracking-tight\">What I work with</h2>\n"
             "      <div className=\"mt-8 grid gap-3 sm:grid-cols-2 md:grid-cols-3\">\n"
@@ -546,7 +556,7 @@ def _sections(style: StylePack) -> GeneratedFile:
             "}\n\n"
             "export function ExperienceSection() {\n"
             "  return (\n"
-            "    <section id=\"experience\" className=\"mx-auto max-w-5xl px-4 py-16\">\n"
+            "    <section id=\"experience\" className=\"mx-auto max-w-5xl px-4 py-20\">\n"
             f"      <p className=\"text-xs font-semibold uppercase tracking-[0.22em] {style.accent}\">Experience</p>\n"
             f"      <h2 className=\"mt-3 text-3xl {style.display_weight} tracking-tight\">Recent work</h2>\n"
             "      <div className=\"mt-8 space-y-4\">\n"
@@ -567,17 +577,20 @@ def _sections(style: StylePack) -> GeneratedFile:
             "}\n\n"
             "export function ProjectsSection() {\n"
             "  return (\n"
-            "    <section id=\"projects\" className=\"mx-auto max-w-5xl px-4 py-16\">\n"
+            "    <section id=\"projects\" className=\"mx-auto max-w-5xl px-4 py-20\">\n"
             f"      <p className=\"text-xs font-semibold uppercase tracking-[0.22em] {style.accent}\">Projects</p>\n"
             f"      <h2 className=\"mt-3 text-3xl {style.display_weight} tracking-tight\">Selected work</h2>\n"
-            "      <div className=\"mt-8 grid gap-4 md:grid-cols-3\">\n"
+            "      <div className=\"mt-8 grid gap-5 md:grid-cols-3\">\n"
             "        {portfolio.projects.map((p) => (\n"
-            f"          <a key={{p.title}} href={{p.href}} className=\"group {style.panel} p-5 transition hover:opacity-95\">\n"
-            f"            <h3 className=\"text-lg {style.display_weight}\">{{p.title}}</h3>\n"
-            f"            <p className=\"mt-3 text-sm leading-relaxed {style.muted}\">{{p.blurb}}</p>\n"
-            "            <div className=\"mt-4 flex flex-wrap gap-2\">{p.tags.map((t) => (\n"
-            f"              <span key={{t}} className=\"border {style.border} px-2.5 py-1 text-[11px]\">{{t}}</span>\n"
-            "            ))}</div>\n"
+            f"          <a key={{p.title}} href={{p.href}} className=\"group {style.panel} overflow-hidden transition hover:-translate-y-0.5 hover:opacity-95\">\n"
+            "            <div className={`h-36 bg-gradient-to-br ${p.gradient}`} />\n"
+            "            <div className=\"p-5\">\n"
+            f"              <h3 className=\"text-lg {style.display_weight}\">{{p.title}}</h3>\n"
+            f"              <p className=\"mt-3 text-sm leading-relaxed {style.muted}\">{{p.blurb}}</p>\n"
+            "              <div className=\"mt-4 flex flex-wrap gap-2\">{p.tags.map((t) => (\n"
+            f"                <span key={{t}} className=\"border {style.border} px-2.5 py-1 text-[11px]\">{{t}}</span>\n"
+            "              ))}</div>\n"
+            "            </div>\n"
             "          </a>\n"
             "        ))}\n"
             "      </div>\n"
@@ -586,18 +599,17 @@ def _sections(style: StylePack) -> GeneratedFile:
             "}\n\n"
             "export function ContactSection() {\n"
             "  return (\n"
-            "    <section id=\"contact\" className=\"mx-auto max-w-5xl px-4 py-16 pb-24\">\n"
+            "    <section id=\"contact\" className=\"mx-auto max-w-5xl px-4 py-20 pb-28\">\n"
             f"      <div className=\"{style.panel} p-8 md:p-10\">\n"
             f"        <p className=\"text-xs font-semibold uppercase tracking-[0.22em] {style.accent}\">Contact</p>\n"
             f"        <h2 className=\"mt-3 text-3xl {style.display_weight} tracking-tight\">Let's build something</h2>\n"
-            f"        <p className=\"mt-3 max-w-xl {style.muted}\">Tell me about your app, API, or product idea.</p>\n"
+            f"        <p className=\"mt-3 max-w-xl {style.muted}\">Tell me about your app, API, or product idea — or email {{portfolio.email}}.</p>\n"
             "        <form className=\"mt-8 grid max-w-lg gap-3\" onSubmit={(e) => e.preventDefault()}>\n"
             f"          <input className=\"border {style.border} bg-transparent px-3 py-3 text-sm outline-none {style.radius}\" placeholder=\"Name\" required />\n"
             f"          <input type=\"email\" className=\"border {style.border} bg-transparent px-3 py-3 text-sm outline-none {style.radius}\" placeholder=\"Email\" required />\n"
             f"          <textarea className=\"min-h-28 border {style.border} bg-transparent px-3 py-3 text-sm outline-none {style.radius}\" placeholder=\"Project details\" required />\n"
-            "          <PortfolioButton href=\"#\">Send message</PortfolioButton>\n"
+            f"          <button type=\"submit\" className=\"{style.accent_soft} {style.radius} px-5 py-2.5 text-sm font-semibold transition hover:opacity-90\">Send message</button>\n"
             "        </form>\n"
-            f"        <p className=\"mt-6 text-sm {style.muted}\">{{portfolio.email}}</p>\n"
             "      </div>\n"
             "    </section>\n"
             "  )\n"
@@ -614,8 +626,8 @@ def _footer(name: str, style: StylePack) -> GeneratedFile:
             "  return (\n"
             f"    <footer className=\"border-t {style.border}\">\n"
             f"      <div className=\"mx-auto flex max-w-5xl flex-col gap-2 px-4 py-8 text-sm {style.muted} sm:flex-row sm:items-center sm:justify-between\">\n"
-            f"        <p>© {{new Date().getFullYear()}} {name}. {style.label} template — edit freely.</p>\n"
-            "        <p>Flutter · Python · Product-minded engineering</p>\n"
+            f"        <p>© {{new Date().getFullYear()}} {name}. Built with care.</p>\n"
+            "        <p>Available for freelance · Full-time</p>\n"
             "      </div>\n"
             "    </footer>\n"
             "  )\n"

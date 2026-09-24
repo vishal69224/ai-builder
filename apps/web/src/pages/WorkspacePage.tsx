@@ -125,6 +125,8 @@ export function WorkspacePage() {
       setStatusMsg(
         result.mode === 'edit'
           ? `Edit applied — ${result.files.length} files`
+          : result.mode === 'revert'
+            ? `Reverted to previous version — ${result.files.length} files restored`
           : result.preview?.ok
             ? `Built ${result.files.length} files — live preview ready`
             : `Generated ${result.files.length} files`,
@@ -187,6 +189,35 @@ export function WorkspacePage() {
     URL.revokeObjectURL(url)
   }
 
+  const canOpenPreview = Boolean(project?.current_run_id && (livePreview || previewHtml))
+
+  const previewSrc = useMemo(() => {
+    if (!token || !id) return null
+    if (livePreview) {
+      return `${api.livePreviewUrl(id)}?access_token=${encodeURIComponent(token)}&v=${previewKey}`
+    }
+    return null
+  }, [token, id, livePreview, previewKey])
+
+  function onOpenInNewTab() {
+    if (!token || !id || !canOpenPreview) return
+    if (livePreview) {
+      const url = `${api.livePreviewUrl(id)}?access_token=${encodeURIComponent(token)}&v=${Date.now()}`
+      window.open(url, '_blank', 'noopener,noreferrer')
+      return
+    }
+    const html = previewHtml || emptyPreview
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank', 'noopener,noreferrer')
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
+  function onRefreshPreview() {
+    setPreviewKey((k) => k + 1)
+    void refresh()
+  }
+
   const language = useMemo(() => languageFor(selectedPath), [selectedPath])
   const visibleFiles = useMemo(
     () => files.filter((f) => !f.path.startsWith('.builder/') && f.path !== 'preview.html'),
@@ -209,12 +240,22 @@ export function WorkspacePage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className={`k-badge ${livePreview ? 'k-badge-accent' : 'k-badge-neutral'}`}>
-              {livePreview ? 'Live' : 'Static'}
+              {livePreview ? 'Live' : project?.current_run_id ? 'Static' : 'Empty'}
             </span>
             <button
               type="button"
-              onClick={() => void onDownload()}
+              onClick={onOpenInNewTab}
               className="k-btn"
+              disabled={!canOpenPreview}
+              title="Open preview in a new browser tab"
+            >
+              <ExternalLinkIcon />
+              Open in new tab
+            </button>
+            <button
+              type="button"
+              onClick={() => void onDownload()}
+              className="k-btn k-btn-primary"
               disabled={!project?.current_run_id}
             >
               Download ZIP
@@ -235,7 +276,7 @@ export function WorkspacePage() {
               style={{ boxShadow: 'none' }}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g. Flutter portfolio or clothing brand store"
+              placeholder="e.g. make it perfect · revert · change the hero to dark luxury"
             />
             <button
               type="submit"
@@ -295,7 +336,7 @@ export function WorkspacePage() {
           </div>
         </aside>
 
-        <section className="order-1 flex min-h-[70vh] flex-col lg:order-2">
+        <section className="order-1 flex min-h-0 flex-1 flex-col lg:order-2 lg:min-h-[calc(100vh-4.25rem)]">
           <div className="flex flex-wrap items-center gap-1 border-b border-[var(--line)] bg-[var(--bg-elevated)] px-3 py-2">
             {(['preview', 'code', 'history'] as Tab[]).map((t) => (
               <button
@@ -311,6 +352,30 @@ export function WorkspacePage() {
                 {t}
               </button>
             ))}
+            {tab === 'preview' && (
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onRefreshPreview}
+                  className="k-btn k-btn-ghost"
+                  disabled={!project?.current_run_id || busy}
+                  title="Refresh preview"
+                >
+                  <RefreshIcon />
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenInNewTab}
+                  className="k-btn"
+                  disabled={!canOpenPreview}
+                  title="Open preview in a new browser tab"
+                >
+                  <ExternalLinkIcon />
+                  Open in new tab
+                </button>
+              </div>
+            )}
             {tab === 'code' && (
               <button
                 type="button"
@@ -324,35 +389,61 @@ export function WorkspacePage() {
           </div>
 
           {tab === 'preview' && (
-            <div className="relative min-h-[70vh] flex-1 bg-[var(--bg-muted)]">
-              {busy && (
-                <div className="absolute inset-0 z-10 flex items-center justify-center" style={{ background: 'color-mix(in oklab, var(--bg) 82%, transparent)' }}>
-                  <div className="k-card k-fade px-8 py-6 text-center">
-                    <div className="k-pulse-warm mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
-                      <span className="k-spin inline-block h-6 w-6 rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-                    </div>
-                    <p className="mt-4 font-semibold text-[var(--ink)]">Building preview…</p>
-                    <p className="k-caption mt-1">Almost ready.</p>
-                  </div>
+            <div className="relative flex min-h-[70vh] flex-1 flex-col bg-[var(--bg-muted)] p-3 md:p-4">
+              <div className="mb-3 flex items-center gap-2 rounded-[var(--radius)] border border-[var(--line)] bg-[var(--bg-elevated)] px-3 py-2 shadow-[var(--shadow-soft)]">
+                <span className="flex gap-1.5" aria-hidden>
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#e8a0a0]" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#e8d4a0]" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#a8d4b8]" />
+                </span>
+                <div className="k-mono min-w-0 flex-1 truncate rounded-full bg-[var(--bg-muted)] px-3 py-1 text-[var(--muted)]">
+                  {livePreview ? 'live preview · full site' : project?.current_run_id ? 'static snapshot' : 'no preview yet'}
                 </div>
-              )}
-              {livePreview && token ? (
-                <iframe
-                  key={`live-${previewKey}-${id}`}
-                  title="Live Preview"
-                  className="min-h-[70vh] w-full flex-1 bg-white"
-                  src={`${api.livePreviewUrl(id)}?access_token=${encodeURIComponent(token)}&v=${previewKey}`}
-                  sandbox="allow-scripts allow-same-origin"
-                />
-              ) : (
-                <iframe
-                  key={`static-${previewKey}`}
-                  title="Preview"
-                  className="min-h-[70vh] w-full flex-1 bg-white"
-                  srcDoc={previewHtml || (visibleFiles.length ? buildingPreview : emptyPreview)}
-                  sandbox="allow-scripts allow-same-origin"
-                />
-              )}
+                <button
+                  type="button"
+                  onClick={onOpenInNewTab}
+                  className="k-btn k-btn-ghost shrink-0 !min-h-8 !px-2.5"
+                  disabled={!canOpenPreview}
+                  aria-label="Open preview in new tab"
+                  title="Open in new tab"
+                >
+                  <ExternalLinkIcon />
+                </button>
+              </div>
+
+              <div className="relative min-h-0 flex-1 overflow-hidden rounded-[var(--radius)] border border-[var(--line)] bg-white shadow-[var(--shadow-soft)]">
+                {busy && (
+                  <div
+                    className="absolute inset-0 z-10 flex items-center justify-center"
+                    style={{ background: 'color-mix(in oklab, var(--bg) 82%, transparent)' }}
+                  >
+                    <div className="k-card k-fade px-8 py-6 text-center">
+                      <div className="k-pulse-warm mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                        <span className="k-spin inline-block h-6 w-6 rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                      </div>
+                      <p className="mt-4 font-semibold text-[var(--ink)]">Building preview…</p>
+                      <p className="k-caption mt-1">Almost ready.</p>
+                    </div>
+                  </div>
+                )}
+                {previewSrc ? (
+                  <iframe
+                    key={`live-${previewKey}-${id}`}
+                    title="Live Preview"
+                    className="h-full min-h-[calc(70vh-3.5rem)] w-full bg-white"
+                    src={previewSrc}
+                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                  />
+                ) : (
+                  <iframe
+                    key={`static-${previewKey}`}
+                    title="Preview"
+                    className="h-full min-h-[calc(70vh-3.5rem)] w-full bg-white"
+                    srcDoc={previewHtml || (visibleFiles.length ? buildingPreview : emptyPreview)}
+                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                  />
+                )}
+              </div>
             </div>
           )}
 
@@ -460,4 +551,32 @@ function languageFor(path: string | null): string {
   if (path.endsWith('.json')) return 'json'
   if (path.endsWith('.md')) return 'markdown'
   return 'plaintext'
+}
+
+function ExternalLinkIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M14 4h6v6M10 14 20 4M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function RefreshIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path
+        d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"
+        stroke="currentColor"
+        strokeWidth="1.75"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
 }

@@ -142,8 +142,10 @@ def generate_luxury_fashion(requirements: StructuredRequirements, plan: ProjectP
     if "young" in (analysis.raw_prompt or "").lower():
         tagline = f"Modern branded fashion from {brand} — built for style that moves."
 
+    headline = _hero_headline(brand, analysis.raw_prompt or "")
     monogram = "".join(w[0] for w in brand.split()[:2]).upper() or "VC"
     palette = _pick_palette(brand, analysis.raw_prompt or "")
+    hero_img = FASHION_IMGS[(sum(ord(c) for c in brand) + 1) % min(4, len(FASHION_IMGS))]
 
     catalog_json = json.dumps(products, indent=2)
     files: list[GeneratedFile] = [
@@ -157,6 +159,8 @@ def generate_luxury_fashion(requirements: StructuredRequirements, plan: ProjectP
                 f"export const brandName = {json.dumps(brand)}\n"
                 f"export const brandMonogram = {json.dumps(monogram)}\n"
                 f"export const brandTagline = {json.dumps(tagline)}\n"
+                f"export const brandHeadline = {json.dumps(headline)}\n"
+                f"export const heroImage = {json.dumps(hero_img)}\n"
                 f"export const products: Product[] = {catalog_json}\n\n"
                 "export function filterProducts(opts: { gender?: string; category?: string; q?: string }) {\n"
                 "  return products.filter((p) => {\n"
@@ -172,7 +176,7 @@ def generate_luxury_fashion(requirements: StructuredRequirements, plan: ProjectP
         _button(),
         _logo(palette),
         _navbar(brand, plan, palette),
-        _hero(brand, tagline, palette),
+        _hero(brand, tagline, palette, hero_img, headline),
         _product_card(),
         _product_grid(),
         _section_blocks(brand),
@@ -499,7 +503,7 @@ def _navbar(brand: str, plan: ProjectPlan, palette: dict) -> GeneratedFile:
             "    <header className=\"sticky top-0 z-50 border-b border-stone-200/70 bg-[#FAFAF8]/95 backdrop-blur-md dark:border-stone-800 dark:bg-stone-950/95\">\n"
             "      <div className=\"mx-auto flex h-16 max-w-6xl items-center justify-between gap-6 px-4 sm:px-6\">\n"
             "        <BrandLogo />\n"
-            "        <nav className=\"hidden items-center gap-7 text-[11px] font-medium uppercase tracking-[0.18em] md:flex\">\n"
+            "        <nav className=\"hidden items-center gap-8 text-[12px] font-medium uppercase tracking-[0.16em] md:flex\">\n"
             "          {links.map((l) => (\n"
             "            <NavLink key={l.to} to={l.to} className={({ isActive }) =>\n"
             "              `transition ${isActive ? 'text-stone-950 dark:text-white' : 'text-stone-500 hover:text-stone-950 dark:hover:text-white'}`\n"
@@ -507,10 +511,10 @@ def _navbar(brand: str, plan: ProjectPlan, palette: dict) -> GeneratedFile:
             "          ))}\n"
             "        </nav>\n"
             "        <div className=\"flex items-center gap-2\">\n"
-            "          <button type=\"button\" onClick={toggle} className=\"hidden rounded-full border border-stone-200 px-3 py-1.5 text-[10px] uppercase tracking-wider text-stone-600 sm:inline-flex dark:border-stone-700 dark:text-stone-300\">{dark ? 'Light' : 'Dark'}</button>\n"
-            "          {showLogin && <Link to=\"/login\" className=\"hidden rounded-full px-3 py-1.5 text-[10px] uppercase tracking-wider text-stone-600 sm:inline-flex dark:text-stone-300\">Sign in</Link>}\n"
-            f"          {{showRegister && <Link to=\"/register\" className=\"hidden rounded-full px-4 py-1.5 text-[10px] uppercase tracking-wider text-stone-950 sm:inline-flex\" style={{{{ backgroundColor: '{accent}' }}}}>Sign up</Link>}}\n"
-            "          <Link to=\"/shop\" className=\"rounded-full bg-stone-950 px-4 py-1.5 text-[10px] uppercase tracking-wider text-white dark:bg-stone-100 dark:text-stone-950\">Cart</Link>\n"
+            "          <button type=\"button\" onClick={toggle} className=\"hidden rounded-full border border-stone-200 px-3.5 py-2 text-[11px] uppercase tracking-wider text-stone-600 sm:inline-flex dark:border-stone-700 dark:text-stone-300\">{dark ? 'Light' : 'Dark'}</button>\n"
+            "          {showLogin && <Link to=\"/login\" className=\"hidden rounded-full px-3.5 py-2 text-[11px] uppercase tracking-wider text-stone-600 sm:inline-flex dark:text-stone-300\">Sign in</Link>}\n"
+            f"          {{showRegister && <Link to=\"/register\" className=\"hidden rounded-full px-4 py-2 text-[11px] uppercase tracking-wider text-stone-950 sm:inline-flex\" style={{{{ backgroundColor: '{accent}' }}}}>Sign up</Link>}}\n"
+            "          <Link to=\"/shop\" className=\"rounded-full bg-stone-950 px-5 py-2 text-[11px] font-semibold uppercase tracking-wider text-white transition hover:bg-stone-800 dark:bg-stone-100 dark:text-stone-950 dark:hover:bg-white\">Bag</Link>\n"
             "          <button type=\"button\" className=\"rounded-full border border-stone-200 px-3 py-1.5 text-[10px] uppercase md:hidden dark:border-stone-700\" onClick={() => setOpen(v => !v)}>Menu</button>\n"
             "        </div>\n"
             "      </div>\n"
@@ -528,27 +532,49 @@ def _navbar(brand: str, plan: ProjectPlan, palette: dict) -> GeneratedFile:
     )
 
 
-def _hero(brand: str, tagline: str, palette: dict) -> GeneratedFile:
-    img = FASHION_IMGS[0]
+def _hero_headline(brand: str, prompt: str) -> str:
+    lowered = prompt.lower()
+    if any(k in lowered for k in ("street", "urban", "young", "gen z", "hype")):
+        return "Worn loud.\nMade clean."
+    if any(k in lowered for k in ("minimal", "quiet", "atelier", "editorial", "luxury")):
+        return "New season.\nQuiet luxury."
+    if any(k in lowered for k in ("summer", "linen", "resort")):
+        return "Light layers.\nLong days."
+    seed = sum(ord(c) for c in brand) % 3
+    options = [
+        "New season.\nQuiet luxury.",
+        "Cut sharp.\nFeel easy.",
+        f"{brand}.\nEveryday elevated.",
+    ]
+    return options[seed]
+
+
+def _hero(brand: str, tagline: str, palette: dict, hero_img: str, headline: str) -> GeneratedFile:
     accent = palette["accent"]
     safe_tag = tagline.replace("'", "\\'")
+    _ = headline  # stored in catalog as brandHeadline
     return GeneratedFile(
         path="src/components/FashionHero.tsx",
         content=(
             "import { Link } from 'react-router-dom'\n"
-            "import { brandName, brandTagline } from '../data/catalog'\n\n"
+            "import { brandName, brandTagline, brandHeadline, heroImage } from '../data/catalog'\n\n"
             "export function FashionHero() {\n"
+            "  const lines = String(brandHeadline || 'New season.\\nQuiet luxury.').split('\\n')\n"
             "  return (\n"
             "    <section className=\"relative isolate overflow-hidden bg-stone-950 text-white\">\n"
-            f"      <div className=\"absolute inset-0\" style={{{{ backgroundImage: `url('{img}')`, backgroundSize: 'cover', backgroundPosition: 'center 20%' }}}} />\n"
-            "      <div className=\"absolute inset-0 bg-gradient-to-r from-stone-950 via-stone-950/75 to-stone-950/25\" />\n"
-            "      <div className=\"relative mx-auto flex min-h-[70vh] max-w-6xl flex-col justify-end px-4 pb-16 pt-28 sm:px-6 md:min-h-[78vh] md:pb-20\">\n"
-            f"        <p className=\"text-[11px] font-semibold uppercase tracking-[0.35em]\" style={{{{ color: '{accent}' }}}}>{{brandName}}</p>\n"
-            "        <h1 className=\"mt-4 max-w-2xl font-serif text-4xl leading-[1.1] tracking-tight sm:text-5xl md:text-6xl\">New season.<br />Quiet luxury.</h1>\n"
-            f"        <p className=\"mt-5 max-w-md text-sm leading-relaxed text-stone-300 sm:text-base\">{{brandTagline || '{safe_tag}'}}</p>\n"
-            "        <div className=\"mt-9 flex flex-wrap gap-3\">\n"
-            "          <Link to=\"/shop\" className=\"rounded-full bg-white px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-stone-950 transition hover:bg-stone-100\">Shop collection</Link>\n"
-            "          <Link to=\"/lookbook\" className=\"rounded-full border border-white/35 px-6 py-3 text-[11px] font-semibold uppercase tracking-[0.2em] transition hover:border-white/70\">View lookbook</Link>\n"
+            f"      <div className=\"absolute inset-0 scale-105\" style={{{{ backgroundImage: `url(${{heroImage || '{hero_img}'}})`, backgroundSize: 'cover', backgroundPosition: 'center 18%' }}}} />\n"
+            "      <div className=\"absolute inset-0 bg-gradient-to-r from-stone-950/95 via-stone-950/55 to-transparent\" />\n"
+            "      <div className=\"absolute inset-0 bg-gradient-to-t from-stone-950/70 via-transparent to-stone-950/20\" />\n"
+            "      <div className=\"relative mx-auto flex min-h-[76vh] max-w-6xl flex-col justify-end px-4 pb-20 pt-32 sm:px-6 md:min-h-[86vh] md:pb-24\">\n"
+            f"        <p className=\"text-[12px] font-semibold uppercase tracking-[0.32em]\" style={{{{ color: '{accent}' }}}}>{{brandName}}</p>\n"
+            "        <h1 className=\"mt-5 max-w-3xl font-serif text-4xl leading-[1.05] tracking-tight sm:text-5xl md:text-7xl\">\n"
+            "          {lines[0]}\n"
+            "          {lines[1] ? <><br />{lines[1]}</> : null}\n"
+            "        </h1>\n"
+            f"        <p className=\"mt-6 max-w-lg text-[15px] leading-relaxed text-stone-200/90 sm:text-base\">{{brandTagline || '{safe_tag}'}}</p>\n"
+            "        <div className=\"mt-10 flex flex-wrap gap-3\">\n"
+            "          <Link to=\"/shop\" className=\"rounded-full bg-white px-7 py-3.5 text-[12px] font-semibold uppercase tracking-[0.18em] text-stone-950 transition hover:bg-stone-100\">Shop collection</Link>\n"
+            "          <Link to=\"/lookbook\" className=\"rounded-full border border-white/40 px-7 py-3.5 text-[12px] font-semibold uppercase tracking-[0.18em] transition hover:border-white hover:bg-white/10\">View lookbook</Link>\n"
             "        </div>\n"
             "      </div>\n"
             "    </section>\n"

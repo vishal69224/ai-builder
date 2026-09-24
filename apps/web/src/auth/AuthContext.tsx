@@ -15,6 +15,7 @@ type AuthState = {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, name: string) => Promise<void>
+  updateProfile: (name: string) => Promise<User>
   logout: () => void
 }
 
@@ -65,6 +66,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(access_token)
   }, [])
 
+  const updateProfile = useCallback(
+    async (name: string) => {
+      if (!token) throw new Error('Not authenticated')
+      const updated = await api.updateProfile(token, { name: name.trim() })
+      setUser(updated)
+      return updated
+    },
+    [token],
+  )
+
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY)
     setToken(null)
@@ -72,8 +83,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ token, user, loading, login, register, logout }),
-    [token, user, loading, login, register, logout],
+    () => ({ token, user, loading, login, register, updateProfile, logout }),
+    [token, user, loading, login, register, updateProfile, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

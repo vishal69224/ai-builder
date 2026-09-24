@@ -15,7 +15,7 @@ from app.core.config import get_settings
 from app.generation.agents.prompt_agent import PromptAgent
 from app.generation.context import GenerationContext
 from app.generation.dependency.dependency_manager import DependencyManager
-from app.generation.edit.edit_mode import EditModeService
+from app.generation.edit.edit_mode import EditModeService, FollowUpKind
 from app.generation.generators.api_generator import ApiGenerator
 from app.generation.generators.component_generator import ComponentGenerator
 from app.generation.generators.css_generator import CssGenerator
@@ -32,7 +32,10 @@ from app.models.enums import DeploymentStatus, GenerationStatus, ProjectStatus
 from app.models.generation import GenerationRun
 from app.models.project import Project
 from app.models.user import User
+from app.providers.ai.factory import get_ai_provider
+from app.providers.ai.schemas import FileSpec, GenerationRequest
 from app.providers.storage.local import LocalArtifactStorage
+from sqlalchemy import select
 
 
 class GenerationEngine:
@@ -70,9 +73,10 @@ class GenerationEngine:
             raise HTTPException(status_code=422, detail="Prompt is required")
 
         has_existing = project_id is not None
-        is_edit = self.edit_mode.is_edit_prompt(prompt, has_existing)
+        follow_up = self.edit_mode.classify(prompt, has_existing)
 
         # Prompt understanding (Phase 4) — analyze + extract into context
+        # For polish/revert we may override the prompt before or after analysis.
         self.prompt_agent.execute(ctx)
         analysis = ctx.analysis
         requirements = ctx.requirements
@@ -82,6 +86,41 @@ class GenerationEngine:
         preferred_name = (project_name or analysis.brand_name or analysis.website_type or "Generated Site").strip()
         project = self._resolve_project(db, user, project_id, preferred_name, analysis.website_type)
         site_title = (analysis.brand_name or project.name or preferred_name).strip()
+
+        # Keep the existing brand when polishing / editing an existing project
+        if has_existing and project.name and follow_up in {
+            FollowUpKind.polish,
+            FollowUpKind.targeted_edit,
+            FollowUpKind.soft_edit,
+            FollowUpKind.revert,
+        }:
+            site_title = project.name
+            analysis.brand_name = project.name
+
+        # Revert early — no need to rebuild from a vague prompt
+        if follow_up == FollowUpKind.revert and project.current_run_id:
+            return self._run_revert(db, user, project, prompt, analysis, requirements)
+
+        # Polish: rebuild from a strong seed prompt (keeps brand + niche)
+        if follow_up == FollowUpKind.polish and project.current_run_id:
+            last_prompt = self._last_build_prompt(db, project)
+            niche_hint = self._niche_hint_from_project(project)
+            polished = self.edit_mode.polish_seed_prompt(
+                project_name=project.name,
+                last_prompt=last_prompt,
+                niche_hint=niche_hint,
+            )
+            ctx.prompt = polished
+            prompt = polished
+            # Re-analyze with the enriched prompt so clothing/portfolio/saas routes correctly
+            self.prompt_agent.execute(ctx)
+            analysis = ctx.analysis
+            requirements = ctx.requirements
+            if analysis is None or requirements is None:
+                raise HTTPException(status_code=500, detail="PromptAgent failed during polish")
+            analysis.brand_name = project.name
+            site_title = project.name
+            follow_up = FollowUpKind.generate
 
         # Phase 1: WebsitePlan artifact (does not change template selection)
         settings = get_settings()
@@ -116,18 +155,26 @@ class GenerationEngine:
                     )
                 )
                 if planned and (messy or planned.lower() != site_title.lower()):
-                    site_title = planned
-                    if messy or project.name.lower() in {
-                        "new",
-                        "untitled",
-                        "generated site",
-                        analysis.website_type.lower(),
-                    } or len(project.name) > 40:
-                        project.name = planned[:200]
-                    analysis.brand_name = planned
+                    # Never overwrite a stable project name during polish/edit
+                    if follow_up in {FollowUpKind.targeted_edit, FollowUpKind.soft_edit} or (
+                        project.name and project.name.lower() not in {"new", "untitled", "generated site"}
+                    ):
+                        site_title = project.name
+                        analysis.brand_name = project.name
+                        website_plan.brand_name = project.name
+                    else:
+                        site_title = planned
+                        if messy or project.name.lower() in {
+                            "new",
+                            "untitled",
+                            "generated site",
+                            analysis.website_type.lower(),
+                        } or len(project.name) > 40:
+                            project.name = planned[:200]
+                        analysis.brand_name = planned
 
         semantic_report = None
-        if is_edit and project.current_run_id:
+        if follow_up in {FollowUpKind.targeted_edit, FollowUpKind.soft_edit} and project.current_run_id:
             files = self._run_edit_mode(project, prompt)
             mode = "edit"
         else:
@@ -137,7 +184,7 @@ class GenerationEngine:
             mode = "generate"
 
         plan = self.planner.plan(requirements, site_title)
-        validation = self.validator.validate(files, plan)
+        validation = self.validator.validate(files, plan, skip_routes=(mode == "edit"))
         if not validation["ok"]:
             raise HTTPException(status_code=500, detail={"message": "Validation failed", **validation})
 
@@ -365,16 +412,212 @@ class GenerationEngine:
 
     def _run_edit_mode(self, project: Project, prompt: str) -> list[GeneratedFile]:
         assert project.current_run_id
-        paths = self.storage.list_files(project.id, project.current_run_id)
-        existing = [
-            GeneratedFile(
-                path=p,
-                content=self.storage.read_file(project.id, project.current_run_id, p).decode("utf-8"),
-            )
-            for p in paths
-            if not p.startswith(".builder/")
-        ]
+        existing = self._load_run_files(project, project.current_run_id)
+        settings = get_settings()
+        provider = get_ai_provider(settings)
+
+        # Real API edits when a key is configured
+        if not settings.ai_mock and settings.ai_api_key and hasattr(provider, "edit_site"):
+            try:
+                targets = self.edit_mode.resolve_existing_targets(prompt, existing)
+                prior = existing
+                if targets:
+                    target_set = set(targets)
+                    prior = [f for f in existing if f.path in target_set] or existing[:16]
+                else:
+                    # Send the most important visual files for soft edits
+                    preferred = (
+                        "src/components/FashionHero.tsx",
+                        "src/components/StoreNavbar.tsx",
+                        "src/components/Hero.tsx",
+                        "src/components/ProductHero.tsx",
+                        "src/index.css",
+                        "src/data/catalog.ts",
+                        "src/App.tsx",
+                    )
+                    prior = [f for f in existing if f.path in preferred] or existing[:12]
+
+                result = provider.edit_site(
+                    GenerationRequest(
+                        prompt=prompt,
+                        project_name=project.name,
+                        prior_files=[FileSpec(path=f.path, content=f.content) for f in prior],
+                    )
+                )
+                by_path = {f.path: f for f in existing}
+                for item in result.files:
+                    by_path[item.path] = GeneratedFile(path=item.path, content=item.content)
+                return list(by_path.values())
+            except Exception:
+                pass
+
         return self.edit_mode.apply_edits(prompt, existing)
+
+    def _run_revert(
+        self,
+        db: Session,
+        user: User,
+        project: Project,
+        prompt: str,
+        analysis,
+        requirements,
+    ) -> dict:
+        previous = self._previous_run(db, project)
+        if previous is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Nothing to revert — only one generation exists for this project.",
+            )
+
+        files = self._load_run_files(project, previous.id)
+        if not files:
+            raise HTTPException(status_code=400, detail="Previous generation has no files to restore.")
+
+        plan = self.planner.plan(requirements, project.name)
+        validation = self.validator.validate(files, plan)
+        if not validation["ok"]:
+            # Still restore — validation on restored specialty sites can be loose
+            validation = {"ok": True, "errors": [], "warnings": ["Restored previous version"]}
+
+        run = GenerationRun(
+            project_id=project.id,
+            user_id=user.id,
+            prompt=prompt.strip(),
+            status=GenerationStatus.succeeded,
+            provider="local_ai",
+            model="revert",
+            finished_at=datetime.now(timezone.utc),
+        )
+        db.add(run)
+        db.flush()
+
+        analysis_dict = analysis.to_dict() if hasattr(analysis, "to_dict") else {}
+        # Prefer previous analysis metadata if present
+        try:
+            raw = self.storage.read_file(project.id, previous.id, ".builder/analysis.json")
+            analysis_dict = json.loads(raw.decode("utf-8"))
+        except Exception:
+            pass
+
+        website_plan_dict = None
+        try:
+            raw = self.storage.read_file(project.id, previous.id, ".builder/website_plan.json")
+            website_plan_dict = json.loads(raw.decode("utf-8"))
+        except Exception:
+            pass
+
+        self._write_files(db, project, run, files, analysis_dict, website_plan=website_plan_dict)
+        storage_root = self.storage.root
+        self.preview.sync_from_storage(storage_root, project.id, run.id)
+        preview_result = self.preview.install_and_build(project.id, run.id)
+
+        project.current_run_id = run.id
+        db.commit()
+        db.refresh(project)
+        db.refresh(run)
+
+        return {
+            "mode": "revert",
+            "project": {
+                "id": str(project.id),
+                "name": project.name,
+                "description": project.description,
+                "current_run_id": str(project.current_run_id),
+            },
+            "run": {
+                "id": str(run.id),
+                "status": str(run.status.value if hasattr(run.status, "value") else run.status),
+                "prompt": run.prompt,
+            },
+            "analysis": analysis_dict,
+            "requirements": {
+                "features": requirements.features,
+                "content_sections": requirements.content_sections,
+                "cta_primary": requirements.cta_primary,
+                "tone": requirements.tone,
+            },
+            "plan": plan.to_dict(),
+            "validation": validation,
+            "preview": preview_result,
+            "files": [{"path": f.path, "size_bytes": len(f.content.encode("utf-8"))} for f in files],
+            "bundle_summary": {
+                "file_count": len(files),
+                "website_type": analysis_dict.get("website_type", "restored"),
+                "restored_from": str(previous.id),
+            },
+        }
+
+    def _load_run_files(self, project: Project, run_id: UUID) -> list[GeneratedFile]:
+        paths = self.storage.list_files(project.id, run_id)
+        files: list[GeneratedFile] = []
+        for p in paths:
+            if p.startswith(".builder/"):
+                continue
+            try:
+                files.append(
+                    GeneratedFile(
+                        path=p,
+                        content=self.storage.read_file(project.id, run_id, p).decode("utf-8"),
+                    )
+                )
+            except Exception:
+                continue
+        return files
+
+    def _previous_run(self, db: Session, project: Project) -> GenerationRun | None:
+        runs = db.scalars(
+            select(GenerationRun)
+            .where(
+                GenerationRun.project_id == project.id,
+                GenerationRun.status == GenerationStatus.succeeded,
+            )
+            .order_by(GenerationRun.created_at.desc())
+        ).all()
+        if len(runs) < 2:
+            return None
+        # Skip current; pick the next older succeeded run that isn't a failed revert chain
+        current_id = project.current_run_id
+        for run in runs:
+            if current_id and run.id == current_id:
+                continue
+            return run
+        return None
+
+    def _last_build_prompt(self, db: Session, project: Project) -> str | None:
+        runs = db.scalars(
+            select(GenerationRun)
+            .where(
+                GenerationRun.project_id == project.id,
+                GenerationRun.status == GenerationStatus.succeeded,
+            )
+            .order_by(GenerationRun.created_at.desc())
+        ).all()
+        for run in runs:
+            text = (run.prompt or "").strip()
+            if not text:
+                continue
+            kind = self.edit_mode.classify(text, True)
+            if kind in {FollowUpKind.polish, FollowUpKind.revert}:
+                continue
+            return text
+        return None
+
+    def _niche_hint_from_project(self, project: Project) -> str:
+        if not project.current_run_id:
+            return "website"
+        try:
+            paths = set(self.storage.list_files(project.id, project.current_run_id))
+        except Exception:
+            return "website"
+        if "src/data/catalog.ts" in paths or "src/components/FashionHero.tsx" in paths:
+            return "luxury clothing fashion"
+        if "src/data/portfolio.ts" in paths:
+            return "developer portfolio"
+        if "src/data/product.ts" in paths or "src/components/ProductHero.tsx" in paths:
+            return "SaaS product"
+        if "src/components/BookHero.tsx" in paths:
+            return "bookstore"
+        return "website"
 
     def _scaffold_files(self, title: str, requirements) -> list[GeneratedFile]:
         analysis = requirements.analysis

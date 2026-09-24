@@ -21,7 +21,7 @@ def generate_saas_product(requirements: StructuredRequirements, plan: ProjectPla
     files: list[GeneratedFile] = [
         _tokens(primary),
         _button(primary),
-        _navbar(brand, plan, primary),
+        _navbar(brand, plan, primary, cta),
         _hero(brand, tagline, cta, product, primary),
         _social_proof(),
         _features(product),
@@ -143,12 +143,14 @@ def _button(primary: str) -> GeneratedFile:
             "  const base = 'inline-flex items-center justify-center rounded-xl px-5 py-2.5 text-sm font-semibold transition '\n"
             "  const styles =\n"
             "    variant === 'primary'\n"
-            f"      ? 'text-white shadow-lg shadow-violet-500/25 hover:brightness-110'\n"
+            "      ? 'text-white shadow-lg hover:brightness-110'\n"
             "      : variant === 'soft'\n"
-            "        ? 'bg-violet-50 text-violet-700 hover:bg-violet-100'\n"
+            f"        ? 'hover:opacity-90'\n"
             "        : 'border border-slate-200 bg-white text-slate-800 hover:bg-slate-50'\n"
+            "  const softStyle = variant === 'soft' ? { backgroundColor: 'color-mix(in oklab, var(--brand) 14%, white)', color: 'var(--brand)' } : undefined\n"
+            "  const shadow = variant === 'primary' ? { backgroundColor: 'var(--brand)', boxShadow: '0 12px 28px -14px color-mix(in oklab, var(--brand) 55%, transparent)' } : softStyle\n"
             "  return (\n"
-            f"    <a href={{href}} className={{`${{base}}${{styles}} ${{className}}`}} style={{{{ backgroundColor: variant === 'primary' ? '{primary}' : undefined }}}}>\n"
+            "    <a href={href} className={`${base}${styles} ${className}`} style={shadow}>\n"
             "      {children}\n"
             "    </a>\n"
             "  )\n"
@@ -157,7 +159,7 @@ def _button(primary: str) -> GeneratedFile:
     )
 
 
-def _navbar(brand: str, plan: ProjectPlan, primary: str) -> GeneratedFile:
+def _navbar(brand: str, plan: ProjectPlan, primary: str, cta: str = "Start free") -> GeneratedFile:
     links = []
     for r in plan.routes:
         if r["path"] == "/":
@@ -196,7 +198,7 @@ def _navbar(brand: str, plan: ProjectPlan, primary: str) -> GeneratedFile:
             "        </nav>\n"
             "        <div className=\"flex items-center gap-2\">\n"
             "          <Button href=\"#demo\" variant=\"ghost\" className=\"hidden sm:inline-flex\">Sign in</Button>\n"
-            "          <Button href=\"#pricing\">Start free</Button>\n"
+            f"          <Button href=\"#pricing\">{_esc(cta)}</Button>\n"
             "        </div>\n"
             "      </div>\n"
             "    </header>\n"
@@ -213,21 +215,29 @@ def _hero(brand: str, tagline: str, cta: str, product: str, primary: str) -> Gen
         "ai": "AI Platform",
         "saas": "Product Platform",
     }.get(product, "AI Product")
+    headlines = {
+        "video": f"Turn prompts into polished videos with {_esc(brand)}",
+        "image": f"Generate stunning visuals with {_esc(brand)}",
+        "ai": f"Ship faster with {_esc(brand)}",
+        "saas": f"Launch and grow with {_esc(brand)}",
+    }
+    headline = headlines.get(product, f"Build with {_esc(brand)}")
     preview_label = "Script → cinematic clip" if product == "video" else "Prompt → polished output"
     return GeneratedFile(
         path="src/components/ProductHero.tsx",
         content=(
-            "import { Button } from './Button'\n\n"
+            "import { Button } from './Button'\n"
+            "import '../styles/product.css'\n\n"
             "export function ProductHero() {\n"
             "  return (\n"
-            "    <section className=\"relative overflow-hidden border-b border-slate-200 bg-gradient-to-b from-violet-50/80 via-white to-white\">\n"
-            "      <div className=\"pointer-events-none absolute -left-24 top-10 h-64 w-64 rounded-full bg-violet-200/40 blur-3xl\" />\n"
-            "      <div className=\"pointer-events-none absolute -right-20 bottom-0 h-72 w-72 rounded-full bg-fuchsia-200/30 blur-3xl\" />\n"
-            "      <div className=\"relative mx-auto grid max-w-6xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:items-center lg:py-24\">\n"
+            "    <section className=\"relative overflow-hidden border-b border-slate-200 bg-gradient-to-b from-[color-mix(in_oklab,var(--brand)_10%,white)] via-white to-white\">\n"
+            "      <div className=\"pointer-events-none absolute -left-24 top-10 h-64 w-64 rounded-full blur-3xl\" style={{ backgroundColor: 'color-mix(in oklab, var(--brand) 28%, transparent)' }} />\n"
+            "      <div className=\"pointer-events-none absolute -right-20 bottom-0 h-72 w-72 rounded-full blur-3xl\" style={{ backgroundColor: 'color-mix(in oklab, var(--brand) 18%, transparent)' }} />\n"
+            "      <div className=\"relative mx-auto grid max-w-6xl gap-12 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:items-center lg:py-28\">\n"
             "        <div>\n"
-            f"          <p className=\"mb-4 inline-flex rounded-full border border-violet-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wider text-violet-700\">{eyebrow}</p>\n"
-            f"          <h1 className=\"text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl\">Create with {_esc(brand)}</h1>\n"
-            f"          <p className=\"mt-4 max-w-lg text-lg leading-relaxed text-slate-600\">{_esc(tagline)}</p>\n"
+            f"          <p className=\"mb-4 inline-flex rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wider\" style={{{{ color: '{primary}' }}}}>{eyebrow}</p>\n"
+            f"          <h1 className=\"text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-[3.25rem] lg:leading-[1.1]\">{headline}</h1>\n"
+            f"          <p className=\"mt-5 max-w-lg text-lg leading-relaxed text-slate-600\">{_esc(tagline)}</p>\n"
             "          <div className=\"mt-8 flex flex-wrap gap-3\">\n"
             f"            <Button href=\"#demo\">{_esc(cta)}</Button>\n"
             "            <Button href=\"#how\" variant=\"ghost\">See how it works</Button>\n"
@@ -235,21 +245,21 @@ def _hero(brand: str, tagline: str, cta: str, product: str, primary: str) -> Gen
             "          <p className=\"mt-6 text-sm text-slate-500\">No credit card · Export in HD · Ready in minutes</p>\n"
             "        </div>\n"
             "        <div className=\"relative\">\n"
-            "          <div className=\"rounded-2xl border border-slate-200 bg-slate-950 p-3 shadow-2xl shadow-violet-500/25\">\n"
+            "          <div className=\"rounded-2xl border border-slate-200 bg-slate-950 p-3 shadow-2xl\" style={{ boxShadow: '0 28px 60px -28px color-mix(in oklab, var(--brand) 45%, transparent)' }}>\n"
             "            <div className=\"flex items-center gap-1.5 px-2 pb-3\">\n"
             "              <span className=\"h-2.5 w-2.5 rounded-full bg-rose-400\" />\n"
             "              <span className=\"h-2.5 w-2.5 rounded-full bg-amber-400\" />\n"
             "              <span className=\"h-2.5 w-2.5 rounded-full bg-emerald-400\" />\n"
             f"              <span className=\"ml-2 text-xs text-slate-400\">{preview_label}</span>\n"
             "            </div>\n"
-            "            <div className=\"overflow-hidden rounded-xl bg-gradient-to-br from-violet-600 via-fuchsia-600 to-slate-900 p-6 min-h-[220px]\">\n"
+            f"            <div className=\"min-h-[240px] overflow-hidden rounded-xl p-6\" style={{{{ background: `linear-gradient(145deg, {primary}, #0f172a 72%)` }}}}>\n"
             "              <div className=\"rounded-lg border border-white/15 bg-white/10 p-4 backdrop-blur\">\n"
             "                <p className=\"text-xs font-medium uppercase tracking-wide text-white/70\">Prompt</p>\n"
             "                <p className=\"mt-2 text-sm leading-relaxed text-white\">A neon city street at night, slow camera push-in, cinematic lighting…</p>\n"
             "              </div>\n"
             "              <div className=\"mt-4 flex items-center justify-between rounded-lg bg-black/30 px-4 py-3\">\n"
             "                <div className=\"h-1.5 flex-1 overflow-hidden rounded-full bg-white/20\">\n"
-            f"                  <div className=\"h-full w-2/3 rounded-full\" style={{{{ backgroundColor: '{primary}' }}}} />\n"
+            "                  <div className=\"h-full w-2/3 rounded-full bg-white\" />\n"
             "                </div>\n"
             "                <span className=\"ml-3 text-xs font-semibold text-white\">Rendering 67%</span>\n"
             "              </div>\n"
@@ -271,12 +281,12 @@ def _social_proof() -> GeneratedFile:
             "const brands = ['Studio North', 'Pulse Media', 'Orbit Labs', 'Frame Co', 'Nova Ads']\n\n"
             "export function SocialProof() {\n"
             "  return (\n"
-            "    <section className=\"border-b border-slate-100 bg-white py-10\">\n"
+            "    <section className=\"border-b border-slate-100 bg-white py-12\">\n"
             "      <div className=\"mx-auto max-w-6xl px-4 sm:px-6\">\n"
             "        <p className=\"text-center text-xs font-semibold uppercase tracking-wider text-slate-400\">Trusted by creators at</p>\n"
-            "        <ul className=\"mt-5 flex flex-wrap items-center justify-center gap-x-8 gap-y-3\">\n"
+            "        <ul className=\"mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4\">\n"
             "          {brands.map((b) => (\n"
-            "            <li key={b} className=\"text-sm font-semibold text-slate-400\">{b}</li>\n"
+            "            <li key={b} className=\"text-sm font-semibold tracking-tight text-slate-500\">{b}</li>\n"
             "          ))}\n"
             "        </ul>\n"
             "      </div>\n"
@@ -326,13 +336,13 @@ def _features(product: str) -> GeneratedFile:
             "  return (\n"
             "    <section id=\"features\" className=\"bg-slate-50 py-20\">\n"
             "      <div className=\"mx-auto max-w-6xl px-4 sm:px-6\">\n"
-            "        <p className=\"text-sm font-semibold uppercase tracking-wider text-violet-600\">Features</p>\n"
+            "        <p className=\"text-sm font-semibold uppercase tracking-wider\" style={{ color: 'var(--brand)' }}>Features</p>\n"
             "        <h2 className=\"mt-2 text-3xl font-bold tracking-tight text-slate-900\">Everything you need to ship</h2>\n"
             "        <p className=\"mt-3 max-w-2xl text-slate-600\">Built for creators who want premium output without a production team.</p>\n"
             "        <ul className=\"mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-3\">\n"
             "          {features.map((f) => (\n"
-            "            <li key={f.title} className=\"rounded-2xl border border-slate-200 bg-white p-6 shadow-sm\">\n"
-            "              <div className=\"mb-4 h-9 w-9 rounded-xl bg-violet-100\" />\n"
+            "            <li key={f.title} className=\"rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md\">\n"
+            "              <div className=\"mb-4 h-9 w-9 rounded-xl\" style={{ backgroundColor: 'color-mix(in oklab, var(--brand) 16%, white)' }} />\n"
             "              <h3 className=\"text-lg font-semibold text-slate-900\">{f.title}</h3>\n"
             "              <p className=\"mt-2 text-sm leading-relaxed text-slate-600\">{f.body}</p>\n"
             "            </li>\n"
@@ -370,12 +380,12 @@ def _how_it_works(product: str) -> GeneratedFile:
             "  return (\n"
             "    <section id=\"how\" className=\"bg-white py-20\">\n"
             "      <div className=\"mx-auto max-w-6xl px-4 sm:px-6\">\n"
-            "        <p className=\"text-sm font-semibold uppercase tracking-wider text-violet-600\">How it works</p>\n"
+            "        <p className=\"text-sm font-semibold uppercase tracking-wider\" style={{ color: 'var(--brand)' }}>How it works</p>\n"
             "        <h2 className=\"mt-2 text-3xl font-bold tracking-tight text-slate-900\">From prompt to finished piece</h2>\n"
             "        <ol className=\"mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4\">\n"
             "          {steps.map((s) => (\n"
             "            <li key={s.n} className=\"rounded-2xl border border-slate-200 p-5\">\n"
-            "              <span className=\"text-2xl font-bold text-violet-600\">{s.n}</span>\n"
+            "              <span className=\"text-2xl font-bold\" style={{ color: 'var(--brand)' }}>{s.n}</span>\n"
             "              <h3 className=\"mt-3 font-semibold text-slate-900\">{s.title}</h3>\n"
             "              <p className=\"mt-2 text-sm text-slate-600\">{s.body}</p>\n"
             "            </li>\n"
@@ -412,7 +422,7 @@ def _demo(product: str, primary: str) -> GeneratedFile:
             f"            placeholder=\"{_esc(placeholder)}\"\n"
             "            value={value}\n"
             "            onChange={(e) => { setValue(e.target.value); setDone(false) }}\n"
-            "            className=\"min-h-28 w-full resize-none rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-violet-400\"\n"
+            "            className=\"min-h-28 w-full resize-none rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500 focus:border-[var(--brand)]\"\n"
             "          />\n"
             "          <div className=\"mt-3 flex justify-end\">\n"
             "            <button\n"
@@ -452,17 +462,18 @@ def _pricing(brand: str, primary: str) -> GeneratedFile:
             "  return (\n"
             "    <section id=\"pricing\" className=\"bg-white py-20\">\n"
             "      <div className=\"mx-auto max-w-6xl px-4 sm:px-6\">\n"
-            "        <p className=\"text-sm font-semibold uppercase tracking-wider text-violet-600\">Pricing</p>\n"
+            "        <p className=\"text-sm font-semibold uppercase tracking-wider\" style={{ color: 'var(--brand)' }}>Pricing</p>\n"
             f"        <h2 className=\"mt-2 text-3xl font-bold tracking-tight text-slate-900\">Simple plans for {_esc(brand)}</h2>\n"
             "        <div className=\"mt-12 grid gap-5 lg:grid-cols-3\">\n"
             "          {plans.map((p) => (\n"
             "            <div\n"
             "              key={p.name}\n"
-            "              className={`flex flex-col rounded-2xl border p-6 ${p.featured ? 'border-violet-300 bg-violet-50/50 shadow-lg shadow-violet-500/10' : 'border-slate-200 bg-white'}`}\n"
+            "              className={`flex flex-col rounded-2xl border p-6 ${p.featured ? 'shadow-lg' : 'border-slate-200 bg-white'}`}\n"
+            "              style={p.featured ? { borderColor: 'color-mix(in oklab, var(--brand) 45%, white)', backgroundColor: 'color-mix(in oklab, var(--brand) 8%, white)', boxShadow: '0 18px 40px -24px color-mix(in oklab, var(--brand) 40%, transparent)' } : undefined}\n"
             "            >\n"
             "              <div className=\"flex items-center justify-between\">\n"
             "                <h3 className=\"text-lg font-semibold text-slate-900\">{p.name}</h3>\n"
-            "                {p.featured && <span className=\"rounded-full bg-violet-600 px-2.5 py-0.5 text-[11px] font-semibold text-white\">Popular</span>}\n"
+            "                {p.featured && <span className=\"rounded-full px-2.5 py-0.5 text-[11px] font-semibold text-white\" style={{ backgroundColor: 'var(--brand)' }}>Popular</span>}\n"
             "              </div>\n"
             "              <p className=\"mt-4 text-3xl font-bold text-slate-900\">{p.price}<span className=\"text-sm font-medium text-slate-500\">/mo</span></p>\n"
             "              <p className=\"mt-1 text-sm text-slate-600\">{p.note}</p>\n"
@@ -522,11 +533,11 @@ def _cta_banner(brand: str, cta: str, primary: str) -> GeneratedFile:
         content=(
             "export function CTABanner() {\n"
             "  return (\n"
-            f"    <section className=\"py-20\" style={{{{ background: `linear-gradient(135deg, {primary}, #4c1d95)` }}}}>\n"
+            f"    <section className=\"py-20\" style={{{{ background: `linear-gradient(135deg, {primary}, #0f172a)` }}}}>\n"
             "      <div className=\"mx-auto max-w-3xl px-4 text-center sm:px-6\">\n"
             f"        <h2 className=\"text-3xl font-bold text-white\">Ready to create with {_esc(brand)}?</h2>\n"
-            "        <p className=\"mt-3 text-violet-100\">Start free — upgrade when you outgrow the starter plan.</p>\n"
-            f"        <div className=\"mt-8 flex justify-center\"><a href=\"#demo\" className=\"inline-flex rounded-xl bg-white px-6 py-3 text-sm font-semibold text-violet-800 no-underline\">{_esc(cta)}</a></div>\n"
+            "        <p className=\"mt-3 text-white/80\">Start free — upgrade when you outgrow the starter plan.</p>\n"
+            f"        <div className=\"mt-8 flex justify-center\"><a href=\"#demo\" className=\"inline-flex rounded-xl bg-white px-6 py-3 text-sm font-semibold no-underline\" style={{{{ color: '{primary}' }}}}>{_esc(cta)}</a></div>\n"
             "      </div>\n"
             "    </section>\n"
             "  )\n"

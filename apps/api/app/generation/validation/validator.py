@@ -18,7 +18,7 @@ REQUIRED_PATHS = {
 class GenerationValidator:
     """SDD §13 — JSX, imports, duplicates, routes, build readiness."""
 
-    def validate(self, files: list[GeneratedFile], plan: ProjectPlan) -> dict:
+    def validate(self, files: list[GeneratedFile], plan: ProjectPlan, *, skip_routes: bool = False) -> dict:
         paths = {f.path for f in files}
         path_list = [f.path for f in files]
         missing = sorted(REQUIRED_PATHS - paths)
@@ -28,7 +28,8 @@ class GenerationValidator:
         duplicates = sorted({p for p in path_list if path_list.count(p) > 1})
         jsx_errors = self._check_jsx(files)
         import_errors = self._check_imports(files)
-        route_errors = self._check_routes(files, plan)
+        # Edit/revert must not re-plan routes from a vague follow-up prompt
+        route_errors = [] if skip_routes else self._check_routes(files, plan)
 
         ok = (
             not missing

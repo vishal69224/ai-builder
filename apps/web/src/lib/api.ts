@@ -51,14 +51,20 @@ async function request<T>(
     headers: { ...authHeaders(token), ...(options.headers ?? {}) },
   })
   if (!res.ok) {
-    let detail = res.statusText
+    let detail: unknown = res.statusText
     try {
       const body = await res.json()
-      detail = body.detail ?? JSON.stringify(body)
+      detail = body.detail ?? body
     } catch {
       /* ignore */
     }
-    throw new Error(typeof detail === 'string' ? detail : 'Request failed')
+    if (typeof detail === 'string') throw new Error(detail)
+    if (detail && typeof detail === 'object' && 'message' in detail) {
+      const msg = String((detail as { message: unknown }).message)
+      const routes = (detail as { route_errors?: string[] }).route_errors
+      throw new Error(routes?.length ? `${msg}: ${routes[0]}` : msg)
+    }
+    throw new Error('Request failed')
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
@@ -76,6 +82,8 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   me: (token: string) => request<User>('/api/v1/auth/me', {}, token),
+  updateProfile: (token: string, data: { name: string }) =>
+    request<User>('/api/v1/auth/me', { method: 'PATCH', body: JSON.stringify(data) }, token),
   listProjects: (token: string) => request<Project[]>('/api/v1/projects', {}, token),
   createProject: (token: string, data: { name: string; description?: string; prompt?: string }) =>
     request<Project>('/api/v1/projects', { method: 'POST', body: JSON.stringify(data) }, token),

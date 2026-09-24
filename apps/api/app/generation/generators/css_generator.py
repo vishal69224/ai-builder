@@ -24,7 +24,7 @@ class CssGenerator:
         enabled = settings.gen_v2_theme if use_theme_engine is None else use_theme_engine
 
         if enabled and website_plan is not None:
-            return self._generate_from_theme_engine(website_plan)
+            return self._generate_from_theme_engine(website_plan, requirements)
 
         return self._generate_legacy(requirements)
 
@@ -38,29 +38,34 @@ class CssGenerator:
         fashionish = any(
             w in prompt for w in ("clothing", "fashion", "apparel", "boutique", "atelier")
         )
+        portfolioish = any(
+            w in prompt for w in ("portfolio", "developer", "flutter", "resume", "hire me")
+        )
+        saasish = any(
+            w in prompt for w in ("saas", "startup", "ai video", "ai tool", "product landing")
+        )
         is_dark = (not fashionish) and (
             style in {"dark", "neon"} or "dark mode" in prompt or "dark theme" in prompt
         )
 
         bg = "#0a0f1a" if is_dark else ("#FAFAF8" if fashionish else "#f8fafc")
         text = "#e2e8f0" if is_dark else "#0f172a"
+        niche = "clothing" if fashionish else ("portfolio" if portfolioish else ("saas" if saasish else "default"))
 
         root_vars = (
             f"  --brand: {primary};\n"
             f"  --style: {style};\n"
             f"  --bg: {bg};\n"
             f"  --text: {text};\n"
-            + (
-                '  --font-display: "Cormorant Garamond", Georgia, serif;\n'
-                '  --font-body: "DM Sans", "Segoe UI", sans-serif;\n'
-                "  font-family: var(--font-body);\n"
-                if fashionish
-                else '  font-family: "Segoe UI", system-ui, sans-serif;\n'
-            )
+            + self._font_vars(niche)
         )
-        return self._files(root_vars, fashion=fashionish)
+        return self._files(root_vars, niche=niche)
 
-    def _generate_from_theme_engine(self, website_plan: WebsitePlan | dict[str, Any]) -> list[GeneratedFile]:
+    def _generate_from_theme_engine(
+        self,
+        website_plan: WebsitePlan | dict[str, Any],
+        requirements: StructuredRequirements | None = None,
+    ) -> list[GeneratedFile]:
         from app.generation.engines.theme_engine import ThemeEngine
 
         engine = ThemeEngine()
@@ -69,17 +74,58 @@ class CssGenerator:
         niche = getattr(website_plan, "niche", None)
         if niche is None and isinstance(website_plan, dict):
             niche = website_plan.get("niche")
-        return self._files(root_vars, fashion=niche == "clothing")
+        niche_key = niche if niche in {"clothing", "portfolio", "saas"} else "default"
+        if niche_key == "default" and requirements is not None:
+            prompt = (requirements.analysis.raw_prompt or "").lower()
+            if any(w in prompt for w in ("clothing", "fashion", "apparel")):
+                niche_key = "clothing"
+            elif any(w in prompt for w in ("portfolio", "developer", "flutter")):
+                niche_key = "portfolio"
+            elif any(w in prompt for w in ("saas", "startup", "ai video")):
+                niche_key = "saas"
+        # Ensure display fonts exist even when theme engine omitted them
+        if "--font-display" not in root_vars:
+            root_vars += self._font_vars(niche_key)
+        return self._files(root_vars, niche=niche_key)
 
-    def _files(self, root_vars: str, *, fashion: bool = False) -> list[GeneratedFile]:
-        font_import = (
-            '@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap");\n\n'
-            if fashion
-            else ""
-        )
+    def _font_vars(self, niche: str) -> str:
+        if niche == "clothing":
+            return (
+                '  --font-display: "Cormorant Garamond", Georgia, serif;\n'
+                '  --font-body: "DM Sans", "Segoe UI", sans-serif;\n'
+                "  font-family: var(--font-body);\n"
+            )
+        if niche == "portfolio":
+            return (
+                '  --font-display: "Space Grotesk", "Segoe UI", sans-serif;\n'
+                '  --font-body: "DM Sans", "Segoe UI", sans-serif;\n'
+                "  font-family: var(--font-body);\n"
+            )
+        if niche == "saas":
+            return (
+                '  --font-display: "Plus Jakarta Sans", "Segoe UI", sans-serif;\n'
+                '  --font-body: "Plus Jakarta Sans", "Segoe UI", sans-serif;\n'
+                "  font-family: var(--font-body);\n"
+            )
+        return '  font-family: "Segoe UI", system-ui, sans-serif;\n'
+
+    def _font_import(self, niche: str) -> str:
+        if niche == "clothing":
+            return '@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap");\n\n'
+        if niche == "portfolio":
+            return '@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");\n\n'
+        if niche == "saas":
+            return '@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");\n\n'
+        return ""
+
+    def _files(self, root_vars: str, *, niche: str = "default", fashion: bool = False) -> list[GeneratedFile]:
+        if fashion:
+            niche = "clothing"
+        font_import = self._font_import(niche)
         serif_util = (
             ".font-serif { font-family: var(--font-display, Georgia, serif); }\n"
-            if fashion
+            "h1, h2, h3 { font-family: var(--font-display, inherit); }\n"
+            if niche in {"clothing", "portfolio", "saas"}
             else ""
         )
         dark_body = (
@@ -89,7 +135,7 @@ class CssGenerator:
             "  background: #0c0a09;\n"
             "  color: #fafaf9;\n"
             "}\n\n"
-            if fashion
+            if niche == "clothing"
             else (
                 ".dark body {\n"
                 "  background: var(--bg);\n"
